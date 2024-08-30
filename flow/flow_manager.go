@@ -3,8 +3,8 @@ package flow
 import (
 	"errors"
 	"fmt"
-	"github.com/go-streamline/core/flow/models"
 	"github.com/go-streamline/interfaces/definitions"
+	"github.com/go-streamline/interfaces/definitions/models"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
