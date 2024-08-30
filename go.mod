@@ -1,7 +1,7 @@
 module github.com/go-streamline/core
 
 require (
-	github.com/go-streamline/interfaces v0.0.7
+	github.com/go-streamline/interfaces v0.0.9
 	github.com/google/uuid v1.6.0
 	github.com/sirupsen/logrus v1.9.3
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
