@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/go-streamline/interfaces/definitions"
 	"github.com/google/uuid"
-	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -39,7 +38,7 @@ func (fm *DefaultFlowManager) GetFlowByID(flowID uuid.UUID) (*definitions.Flow, 
 		}
 		return nil, err
 	}
-	return fm.convertFlowToInterface(&flow), nil
+	return fm.convertFlowModelToFlow(&flow), nil
 }
 
 func (fm *DefaultFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
@@ -111,7 +110,7 @@ func (fm *DefaultFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, process
 	}
 	processor.FlowOrder = referenceProcessor.FlowOrder
 
-	modelProcessor := fm.convertProcessorFromInterface(processor)
+	modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
 	modelProcessor.FlowID = flowID
 	err = fm.db.Create(modelProcessor).Error
 	if err != nil {
@@ -135,7 +134,7 @@ func (fm *DefaultFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, processo
 	}
 
 	processor.FlowOrder = referenceProcessor.FlowOrder + 1
-	modelProcessor := fm.convertProcessorFromInterface(processor)
+	modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
 	err = fm.db.Model(&processorModel{}).
 		Where("flow_id = ? AND flow_order > ?", flowID, referenceProcessor.FlowOrder).
 		Update("flow_order", gorm.Expr("flow_order + ?", 1)).Error
@@ -157,13 +156,13 @@ func (fm *DefaultFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, processo
 }
 
 func (fm *DefaultFlowManager) SaveFlow(flow *definitions.Flow) error {
-	modelFlow := fm.convertFlowFromInterface(flow)
+	modelFlow := fm.convertFlowToFlowModel(flow)
 	return fm.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&modelFlow).Error; err != nil {
 			return err
 		}
 		for _, processor := range flow.Processors {
-			modelProcessor := fm.convertProcessorFromInterface(&processor)
+			modelProcessor := fm.convertSimpleProcessorToProcessorModel(&processor)
 			modelProcessor.FlowID = modelFlow.ID
 			if err := tx.Save(modelProcessor).Error; err != nil {
 				return err
@@ -176,7 +175,7 @@ func (fm *DefaultFlowManager) SaveFlow(flow *definitions.Flow) error {
 func (fm *DefaultFlowManager) convertFlowsToInterface(flows []flowModel) []definitions.Flow {
 	interfaceFlows := make([]definitions.Flow, len(flows))
 	for i, flow := range flows {
-		interfaceFlows[i] = *fm.convertFlowToInterface(&flow)
+		interfaceFlows[i] = *fm.convertFlowModelToFlow(&flow)
 	}
 	return interfaceFlows
 }
@@ -198,15 +197,11 @@ func (fm *DefaultFlowManager) convertProcessorToInterface(processor *processorMo
 		FlowOrder:  processor.FlowOrder,
 		Config:     processor.Configuration,
 		MaxRetries: processor.MaxRetries,
-		LogLevel:   processor.LogLevel.String(),
+		LogLevel:   processor.LogLevel,
 	}
 }
 
-func (fm *DefaultFlowManager) convertProcessorFromInterface(processor *definitions.SimpleProcessor) *processorModel {
-	level, err := logrus.ParseLevel(processor.LogLevel)
-	if err != nil {
-		level = logrus.WarnLevel
-	}
+func (fm *DefaultFlowManager) convertSimpleProcessorToProcessorModel(processor *definitions.SimpleProcessor) *processorModel {
 	return &processorModel{
 		ID:            processor.ID,
 		FlowID:        processor.FlowID,
@@ -215,11 +210,11 @@ func (fm *DefaultFlowManager) convertProcessorFromInterface(processor *definitio
 		FlowOrder:     processor.FlowOrder,
 		Configuration: processor.Config,
 		MaxRetries:    processor.MaxRetries,
-		LogLevel:      level,
+		LogLevel:      processor.LogLevel,
 	}
 }
 
-func (fm *DefaultFlowManager) convertFlowToInterface(flow *flowModel) *definitions.Flow {
+func (fm *DefaultFlowManager) convertFlowModelToFlow(flow *flowModel) *definitions.Flow {
 	return &definitions.Flow{
 		ID:          flow.ID,
 		Name:        flow.Name,
@@ -228,7 +223,7 @@ func (fm *DefaultFlowManager) convertFlowToInterface(flow *flowModel) *definitio
 	}
 }
 
-func (fm *DefaultFlowManager) convertFlowFromInterface(flow *definitions.Flow) *flowModel {
+func (fm *DefaultFlowManager) convertFlowToFlowModel(flow *definitions.Flow) *flowModel {
 	modelFlow := &flowModel{
 		ID:          flow.ID,
 		Name:        flow.Name,
@@ -236,7 +231,7 @@ func (fm *DefaultFlowManager) convertFlowFromInterface(flow *definitions.Flow) *
 		Processors:  make([]processorModel, len(flow.Processors)),
 	}
 	for i, processor := range flow.Processors {
-		modelFlow.Processors[i] = *fm.convertProcessorFromInterface(&processor)
+		modelFlow.Processors[i] = *fm.convertSimpleProcessorToProcessorModel(&processor)
 	}
 	return modelFlow
 }
