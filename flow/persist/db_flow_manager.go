@@ -280,17 +280,17 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 	})
 }
 
-func (fm *DBFlowManager) convertFlowModelsToFlows(flows []flowModel) []definitions.Flow {
-	interfaceFlows := make([]definitions.Flow, len(flows))
-	for i, flow := range flows {
-		interfaceFlows[i] = *fm.convertFlowModelToFlow(&flow)
+func (fm *DBFlowManager) convertFlowModelsToFlows(flowModels []flowModel) []definitions.Flow {
+	flows := make([]definitions.Flow, len(flowModels))
+	for i, flow := range flowModels {
+		flows[i] = *fm.convertFlowModelToFlow(&flow)
 	}
-	return interfaceFlows
+	return flows
 }
 
-func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processors []processorModel) []definitions.SimpleProcessor {
-	simpleProcessors := make([]definitions.SimpleProcessor, len(processors))
-	for i, processor := range processors {
+func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []processorModel) []definitions.SimpleProcessor {
+	simpleProcessors := make([]definitions.SimpleProcessor, len(processorModels))
+	for i, processor := range processorModels {
 		simpleProcessors[i] = *fm.convertProcessorModelToSimpleProcessor(&processor)
 	}
 	return simpleProcessors
