@@ -64,7 +64,10 @@ func (c *CopyOnWriteEngineFileHandler) GenerateNewFileHandler() (definitions.Eng
 	input := c.input
 	if c.writer != nil {
 		input = c.output
-		defer os.Remove(c.input)
+		if c.reader != nil {
+			c.reader.Close()
+			defer os.Remove(c.input)
+		}
 	}
 
 	c.Close()
