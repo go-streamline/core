@@ -32,7 +32,7 @@ type DBFlowManager struct {
 
 // NewDBFlowManager creates a new instance of DBFlowManager with an in-memory cache for flows.
 func NewDBFlowManager(db *gorm.DB) (definitions.FlowManager, error) {
-	err := db.AutoMigrate(&flowModel{}, &processorModel{})
+	err := db.AutoMigrate(&flowModel{}, &processorModel{}, &triggerProcessorModel{})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrCouldNotRunMigrations, err)
 	}
@@ -94,7 +94,7 @@ func (fm *DBFlowManager) GetFlowByID(flowID uuid.UUID) (*definitions.Flow, error
 	}
 
 	var flow flowModel
-	err = fm.db.First(&flow, "id = ?", flowID).Error
+	err = fm.db.Preload("Processors").Preload("TriggerProcessors").First(&flow, "id = ?", flowID).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -177,6 +177,21 @@ func (fm *DBFlowManager) GetNextProcessors(flowID uuid.UUID, processorID uuid.UU
 		}
 	}
 	return nextProcessors, nil
+}
+
+// GetTriggerProcessorsForFlow retrieves the trigger processors for a given flow.
+func (fm *DBFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]*definitions.SimpleTriggerProcessor, error) {
+	var triggerProcessorModels []*triggerProcessorModel
+	err := fm.db.Where("flow_id = ?", flowID).Find(&triggerProcessorModels).Error
+	if err != nil {
+		return nil, err
+	}
+
+	triggerProcessors := make([]*definitions.SimpleTriggerProcessor, len(triggerProcessorModels))
+	for i, model := range triggerProcessorModels {
+		triggerProcessors[i] = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(model)
+	}
+	return triggerProcessors, nil
 }
 
 // AddProcessorToFlowBefore adds a processor to the flow before a reference processor.
@@ -274,6 +289,14 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 			}
 		}
 
+		for _, triggerProcessor := range flow.TriggerProcessors {
+			modelTriggerProcessor := fm.convertSimpleTriggerProcessorToTriggerProcessorModel(&triggerProcessor)
+			modelTriggerProcessor.FlowID = modelFlow.ID
+			if err := tx.Save(modelTriggerProcessor).Error; err != nil {
+				return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
+			}
+		}
+
 		// Invalidate cache for the flow
 		_ = fm.flowCache.Delete(fm.ctx, flow.ID.String())
 
@@ -301,6 +324,8 @@ func (fm *DBFlowManager) SetFlowActive(flowID uuid.UUID, active bool) error {
 	return fm.db.Model(&flowModel{}).Where("id = ?", flowID).Update("active", active).Error
 }
 
+// Convert functions
+
 func (fm *DBFlowManager) convertFlowModelsToFlows(flowModels []flowModel) []definitions.Flow {
 	flows := make([]definitions.Flow, len(flowModels))
 	for i, flow := range flowModels {
@@ -317,6 +342,14 @@ func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []p
 	return simpleProcessors
 }
 
+func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []triggerProcessorModel) []definitions.SimpleTriggerProcessor {
+	simpleTriggerProcessors := make([]definitions.SimpleTriggerProcessor, len(triggerProcessorModels))
+	for i, triggerProcessor := range triggerProcessorModels {
+		simpleTriggerProcessors[i] = *fm.convertTriggerProcessorModelToSimpleTriggerProcessor(&triggerProcessor)
+	}
+	return simpleTriggerProcessors
+}
+
 func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *processorModel) *definitions.SimpleProcessor {
 	return &definitions.SimpleProcessor{
 		ID:         processor.ID,
@@ -327,6 +360,19 @@ func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *proce
 		Config:     processor.Configuration,
 		MaxRetries: processor.MaxRetries,
 		LogLevel:   processor.LogLevel,
+	}
+}
+
+func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(model *triggerProcessorModel) *definitions.SimpleTriggerProcessor {
+	return &definitions.SimpleTriggerProcessor{
+		ID:           model.ID,
+		FlowID:       model.FlowID,
+		Name:         model.Name,
+		Type:         model.Type,
+		ScheduleType: definitions.ScheduleType(model.ScheduleType),
+		CronExpr:     model.CronExpr,
+		Config:       model.Configuration,
+		LogLevel:     model.LogLevel,
 	}
 }
 
@@ -343,13 +389,27 @@ func (fm *DBFlowManager) convertSimpleProcessorToProcessorModel(processor *defin
 	}
 }
 
+func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(triggerProcessor *definitions.SimpleTriggerProcessor) *triggerProcessorModel {
+	return &triggerProcessorModel{
+		ID:            triggerProcessor.ID,
+		FlowID:        triggerProcessor.FlowID,
+		Name:          triggerProcessor.Name,
+		Type:          triggerProcessor.Type,
+		ScheduleType:  int(triggerProcessor.ScheduleType),
+		CronExpr:      triggerProcessor.CronExpr,
+		Configuration: triggerProcessor.Config,
+		LogLevel:      triggerProcessor.LogLevel,
+	}
+}
+
 func (fm *DBFlowManager) convertFlowModelToFlow(flow *flowModel) *definitions.Flow {
 	return &definitions.Flow{
-		ID:          flow.ID,
-		Name:        flow.Name,
-		Description: flow.Description,
-		Processors:  fm.convertProcessorsToSimpleProcessors(flow.Processors),
-		Active:      flow.Active,
+		ID:                flow.ID,
+		Name:              flow.Name,
+		Description:       flow.Description,
+		Processors:        fm.convertProcessorsToSimpleProcessors(flow.Processors),
+		TriggerProcessors: fm.convertTriggerProcessorsToSimpleTriggerProcessors(flow.TriggerProcessors),
+		Active:            flow.Active,
 	}
 }
 
