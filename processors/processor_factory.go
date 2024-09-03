@@ -32,8 +32,12 @@ type DefaultProcessorFactory struct {
 	processorMap map[string]reflect.Type
 }
 
+func (f *DefaultProcessorFactory) RegisterProcessorWithTypeName(typeName string, processor definitions.Processor) {
+	f.processorMap[typeName] = reflect.TypeOf(processor).Elem()
+}
+
 // NewDefaultProcessorFactory creates a new DefaultProcessorFactory.
-func NewDefaultProcessorFactory() *DefaultProcessorFactory {
+func NewDefaultProcessorFactory() definitions.ProcessorFactory {
 	return &DefaultProcessorFactory{
 		processorMap: make(map[string]reflect.Type),
 	}
