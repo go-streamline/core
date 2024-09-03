@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"time"
 )
 
 var (
@@ -57,11 +58,11 @@ func NewDBFlowManager(db *gorm.DB) (definitions.FlowManager, error) {
 }
 
 // ListFlows lists all flows with pagination.
-func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest) (definitions.PaginatedData[*definitions.Flow], error) {
+func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (definitions.PaginatedData[*definitions.Flow], error) {
 	var flowsModels []*flowModel
 	var totalCount int64
 
-	query := fm.db.Model(&flowModel{}).Count(&totalCount)
+	query := fm.db.Model(&flowModel{}).Where("updated_at > ?", since).Count(&totalCount)
 	if query.Error != nil {
 		return definitions.PaginatedData[*definitions.Flow]{}, fmt.Errorf("%w: %v", ErrFailedToGetTotalCount, query.Error)
 	}
@@ -278,6 +279,24 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 
 		return nil
 	})
+}
+
+func (fm *DBFlowManager) GetLastUpdateTime(flowIDs []uuid.UUID) (map[uuid.UUID]time.Time, error) {
+	var flowModels []flowModel
+	err := fm.db.Find(&flowModels, "id IN ?", flowIDs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	lastUpdateTimes := make(map[uuid.UUID]time.Time)
+	for _, flow := range flowModels {
+		lastUpdateTimes[flow.ID] = flow.UpdatedAt
+	}
+	return lastUpdateTimes, nil
+}
+
+func (fm *DBFlowManager) SetFlowActive(flowID uuid.UUID, active bool) error {
+	return fm.db.Model(&flowModel{}).Where("id = ?", flowID).Update("active", active).Error
 }
 
 func (fm *DBFlowManager) convertFlowModelsToFlows(flowModels []flowModel) []definitions.Flow {

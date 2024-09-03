@@ -5,6 +5,7 @@ import (
 	"github.com/go-streamline/interfaces/definitions"
 	"github.com/google/uuid"
 	"sync"
+	"time"
 )
 
 var (
@@ -14,15 +15,19 @@ var (
 )
 
 type InMemoryFlowManager struct {
-	flows      map[uuid.UUID]*definitions.Flow
-	processors map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor
-	mu         sync.RWMutex
+	flows       map[uuid.UUID]*definitions.Flow
+	processors  map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor
+	lastUpdate  map[uuid.UUID]time.Time
+	activeFlows map[uuid.UUID]bool
+	mu          sync.RWMutex
 }
 
 func NewInMemoryFlowManager() definitions.FlowManager {
 	return &InMemoryFlowManager{
-		flows:      make(map[uuid.UUID]*definitions.Flow),
-		processors: make(map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor),
+		flows:       make(map[uuid.UUID]*definitions.Flow),
+		processors:  make(map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor),
+		lastUpdate:  make(map[uuid.UUID]time.Time),
+		activeFlows: make(map[uuid.UUID]bool),
 	}
 }
 
@@ -63,13 +68,15 @@ func (fm *InMemoryFlowManager) GetLastProcessorForFlow(flowID uuid.UUID) (*defin
 	return lastProcessor, nil
 }
 
-func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationRequest) (definitions.PaginatedData[*definitions.Flow], error) {
+func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (definitions.PaginatedData[*definitions.Flow], error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
 	flows := make([]*definitions.Flow, 0, len(fm.flows))
 	for _, flow := range fm.flows {
-		flows = append(flows, flow)
+		if fm.lastUpdate[flow.ID].After(since) {
+			flows = append(flows, flow)
+		}
 	}
 
 	totalCount := len(flows)
@@ -165,6 +172,8 @@ func (fm *InMemoryFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, proces
 	}
 
 	fm.processors[flowID][processor.ID] = processor
+	fm.updateFlowTimestamp(flowID)
+
 	return nil
 }
 
@@ -190,6 +199,8 @@ func (fm *InMemoryFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, process
 	}
 
 	fm.processors[flowID][processor.ID] = processor
+	fm.updateFlowTimestamp(flowID)
+
 	return nil
 }
 
@@ -204,5 +215,40 @@ func (fm *InMemoryFlowManager) SaveFlow(flow *definitions.Flow) error {
 	for _, processor := range flow.Processors {
 		fm.processors[flow.ID][processor.ID] = &processor
 	}
+	fm.updateFlowTimestamp(flow.ID)
+
 	return nil
+}
+
+func (fm *InMemoryFlowManager) GetLastUpdateTime(flowIDs []uuid.UUID) (map[uuid.UUID]time.Time, error) {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+
+	lastUpdates := make(map[uuid.UUID]time.Time)
+	for _, flowID := range flowIDs {
+		lastUpdate, exists := fm.lastUpdate[flowID]
+		if !exists {
+			return nil, fmt.Errorf("failed to get last update time: %w", ErrFlowNotFound)
+		}
+		lastUpdates[flowID] = lastUpdate
+	}
+
+	return lastUpdates, nil
+}
+
+func (fm *InMemoryFlowManager) SetFlowActive(flowID uuid.UUID, active bool) error {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	if _, exists := fm.flows[flowID]; !exists {
+		return ErrFlowNotFound
+	}
+	fm.activeFlows[flowID] = active
+	fm.updateFlowTimestamp(flowID)
+
+	return nil
+}
+
+func (fm *InMemoryFlowManager) updateFlowTimestamp(flowID uuid.UUID) {
+	fm.lastUpdate[flowID] = time.Now()
 }

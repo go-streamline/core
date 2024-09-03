@@ -3,6 +3,7 @@ package persist
 import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"time"
 )
 
 type flowModel struct {
@@ -10,6 +11,7 @@ type flowModel struct {
 	Name        string
 	Description string
 	Processors  []processorModel `gorm:"foreignKey:FlowID"`
+	UpdatedAt   time.Time        `gorm:"autoUpdateTime:true"`
 }
 
 func (f *flowModel) TableName() string {
