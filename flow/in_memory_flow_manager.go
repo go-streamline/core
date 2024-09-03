@@ -17,8 +17,7 @@ var (
 type InMemoryFlowManager struct {
 	flows       map[uuid.UUID]*definitions.Flow
 	processors  map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor
-	lastUpdate  map[uuid.UUID]time.Time
-	activeFlows map[uuid.UUID]bool
+	flowUpdates map[uuid.UUID]time.Time
 	mu          sync.RWMutex
 }
 
@@ -26,8 +25,7 @@ func NewInMemoryFlowManager() definitions.FlowManager {
 	return &InMemoryFlowManager{
 		flows:       make(map[uuid.UUID]*definitions.Flow),
 		processors:  make(map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor),
-		lastUpdate:  make(map[uuid.UUID]time.Time),
-		activeFlows: make(map[uuid.UUID]bool),
+		flowUpdates: make(map[uuid.UUID]time.Time),
 	}
 }
 
@@ -72,9 +70,9 @@ func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationReque
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	flows := make([]*definitions.Flow, 0, len(fm.flows))
+	flows := make([]*definitions.Flow, 0)
 	for _, flow := range fm.flows {
-		if fm.lastUpdate[flow.ID].After(since) {
+		if update, exists := fm.flowUpdates[flow.ID]; exists && update.After(since) {
 			flows = append(flows, flow)
 		}
 	}
@@ -172,8 +170,7 @@ func (fm *InMemoryFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, proces
 	}
 
 	fm.processors[flowID][processor.ID] = processor
-	fm.updateFlowTimestamp(flowID)
-
+	fm.flowUpdates[flowID] = time.Now()
 	return nil
 }
 
@@ -199,8 +196,7 @@ func (fm *InMemoryFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, process
 	}
 
 	fm.processors[flowID][processor.ID] = processor
-	fm.updateFlowTimestamp(flowID)
-
+	fm.flowUpdates[flowID] = time.Now()
 	return nil
 }
 
@@ -215,8 +211,7 @@ func (fm *InMemoryFlowManager) SaveFlow(flow *definitions.Flow) error {
 	for _, processor := range flow.Processors {
 		fm.processors[flow.ID][processor.ID] = &processor
 	}
-	fm.updateFlowTimestamp(flow.ID)
-
+	fm.flowUpdates[flow.ID] = time.Now()
 	return nil
 }
 
@@ -226,13 +221,12 @@ func (fm *InMemoryFlowManager) GetLastUpdateTime(flowIDs []uuid.UUID) (map[uuid.
 
 	lastUpdates := make(map[uuid.UUID]time.Time)
 	for _, flowID := range flowIDs {
-		lastUpdate, exists := fm.lastUpdate[flowID]
-		if !exists {
-			return nil, fmt.Errorf("failed to get last update time: %w", ErrFlowNotFound)
+		if update, exists := fm.flowUpdates[flowID]; exists {
+			lastUpdates[flowID] = update
+		} else {
+			return nil, ErrFlowNotFound
 		}
-		lastUpdates[flowID] = lastUpdate
 	}
-
 	return lastUpdates, nil
 }
 
@@ -240,15 +234,12 @@ func (fm *InMemoryFlowManager) SetFlowActive(flowID uuid.UUID, active bool) erro
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
 
-	if _, exists := fm.flows[flowID]; !exists {
+	flow, exists := fm.flows[flowID]
+	if !exists {
 		return ErrFlowNotFound
 	}
-	fm.activeFlows[flowID] = active
-	fm.updateFlowTimestamp(flowID)
 
+	flow.Active = active
+	fm.flowUpdates[flowID] = time.Now()
 	return nil
-}
-
-func (fm *InMemoryFlowManager) updateFlowTimestamp(flowID uuid.UUID) {
-	fm.lastUpdate[flowID] = time.Now()
 }

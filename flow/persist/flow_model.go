@@ -12,6 +12,7 @@ type flowModel struct {
 	Description string
 	Processors  []processorModel `gorm:"foreignKey:FlowID"`
 	UpdatedAt   time.Time        `gorm:"autoUpdateTime:true"`
+	Active      bool
 }
 
 func (f *flowModel) TableName() string {

@@ -57,23 +57,23 @@ func NewDBFlowManager(db *gorm.DB) (definitions.FlowManager, error) {
 	}, nil
 }
 
-// ListFlows lists all flows with pagination.
+// ListFlows lists all flows with pagination and filters based on the last update time.
 func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (definitions.PaginatedData[*definitions.Flow], error) {
-	var flowsModels []*flowModel
+	var flowModels []*flowModel
 	var totalCount int64
 
 	query := fm.db.Model(&flowModel{}).Where("updated_at > ?", since).Count(&totalCount)
 	if query.Error != nil {
 		return definitions.PaginatedData[*definitions.Flow]{}, fmt.Errorf("%w: %v", ErrFailedToGetTotalCount, query.Error)
 	}
-	query = query.Offset(pagination.Offset()).Limit(pagination.Limit()).Find(&flowsModels)
+	query = query.Offset(pagination.Offset()).Limit(pagination.Limit()).Find(&flowModels)
 
 	if query.Error != nil {
 		return definitions.PaginatedData[*definitions.Flow]{}, query.Error
 	}
 
-	flows := make([]*definitions.Flow, len(flowsModels))
-	for i, flow := range flowsModels {
+	flows := make([]*definitions.Flow, len(flowModels))
+	for i, flow := range flowModels {
 		flows[i] = fm.convertFlowModelToFlow(flow)
 	}
 
@@ -281,6 +281,7 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 	})
 }
 
+// GetLastUpdateTime retrieves the last update time for the specified flow IDs.
 func (fm *DBFlowManager) GetLastUpdateTime(flowIDs []uuid.UUID) (map[uuid.UUID]time.Time, error) {
 	var flowModels []flowModel
 	err := fm.db.Find(&flowModels, "id IN ?", flowIDs).Error
@@ -295,6 +296,7 @@ func (fm *DBFlowManager) GetLastUpdateTime(flowIDs []uuid.UUID) (map[uuid.UUID]t
 	return lastUpdateTimes, nil
 }
 
+// SetFlowActive sets the active state of a flow.
 func (fm *DBFlowManager) SetFlowActive(flowID uuid.UUID, active bool) error {
 	return fm.db.Model(&flowModel{}).Where("id = ?", flowID).Update("active", active).Error
 }
@@ -347,6 +349,7 @@ func (fm *DBFlowManager) convertFlowModelToFlow(flow *flowModel) *definitions.Fl
 		Name:        flow.Name,
 		Description: flow.Description,
 		Processors:  fm.convertProcessorsToSimpleProcessors(flow.Processors),
+		Active:      flow.Active,
 	}
 }
 
@@ -356,6 +359,7 @@ func (fm *DBFlowManager) convertFlowToFlowModel(flow *definitions.Flow) *flowMod
 		Name:        flow.Name,
 		Description: flow.Description,
 		Processors:  make([]processorModel, len(flow.Processors)),
+		Active:      flow.Active,
 	}
 	for i, processor := range flow.Processors {
 		modelFlow.Processors[i] = *fm.convertSimpleProcessorToProcessorModel(&processor)
