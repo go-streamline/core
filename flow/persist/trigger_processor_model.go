@@ -15,6 +15,7 @@ type triggerProcessorModel struct {
 	Configuration map[string]interface{} `gorm:"column:configuration;type:jsonb;not null"` // Configuration for the trigger processor
 	ScheduleType  int                    `gorm:"column:schedule_type;not null;default:0"`  // 0 for EventDriven, 1 for CronDriven
 	CronExpr      string                 `gorm:"type:varchar(255)"`                        // Cron expression for CronDriven trigger processors
+	Enabled       bool                   `gorm:"column:enabled;not null;default:true"`     // Indicates if the trigger processor is enabled
 }
 
 // BeforeCreate hook to generate a UUID if not provided.

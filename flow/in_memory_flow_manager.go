@@ -15,17 +15,19 @@ var (
 )
 
 type InMemoryFlowManager struct {
-	flows       map[uuid.UUID]*definitions.Flow
-	processors  map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor
-	flowUpdates map[uuid.UUID]time.Time
-	mu          sync.RWMutex
+	flows                  map[uuid.UUID]*definitions.Flow
+	flowToProcessor        map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor
+	flowToTriggerProcessor map[uuid.UUID]map[uuid.UUID]*definitions.SimpleTriggerProcessor
+	flowUpdates            map[uuid.UUID]time.Time
+	mu                     sync.RWMutex
 }
 
 func NewInMemoryFlowManager() definitions.FlowManager {
 	return &InMemoryFlowManager{
-		flows:       make(map[uuid.UUID]*definitions.Flow),
-		processors:  make(map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor),
-		flowUpdates: make(map[uuid.UUID]time.Time),
+		flows:                  make(map[uuid.UUID]*definitions.Flow),
+		flowToProcessor:        make(map[uuid.UUID]map[uuid.UUID]*definitions.SimpleProcessor),
+		flowToTriggerProcessor: make(map[uuid.UUID]map[uuid.UUID]*definitions.SimpleTriggerProcessor),
+		flowUpdates:            make(map[uuid.UUID]time.Time),
 	}
 }
 
@@ -34,11 +36,11 @@ func (fm *InMemoryFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]de
 	defer fm.mu.RUnlock()
 
 	if _, exists := fm.flows[flowID]; !exists {
-		return nil, fmt.Errorf("failed to get first processors: %w", ErrFlowNotFound)
+		return nil, fmt.Errorf("failed to get first flowToProcessor: %w", ErrFlowNotFound)
 	}
 
 	var firstProcessors []definitions.SimpleProcessor
-	for _, processor := range fm.processors[flowID] {
+	for _, processor := range fm.flowToProcessor[flowID] {
 		if processor.FlowOrder == 0 {
 			firstProcessors = append(firstProcessors, *processor)
 		}
@@ -55,7 +57,7 @@ func (fm *InMemoryFlowManager) GetLastProcessorForFlow(flowID uuid.UUID) (*defin
 	}
 
 	var lastProcessor *definitions.SimpleProcessor
-	for _, processor := range fm.processors[flowID] {
+	for _, processor := range fm.flowToProcessor[flowID] {
 		if lastProcessor == nil || processor.FlowOrder > lastProcessor.FlowOrder {
 			lastProcessor = processor
 		}
@@ -64,6 +66,21 @@ func (fm *InMemoryFlowManager) GetLastProcessorForFlow(flowID uuid.UUID) (*defin
 		return nil, ErrLastProcessorNotFound
 	}
 	return lastProcessor, nil
+}
+
+func (fm *InMemoryFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]*definitions.SimpleTriggerProcessor, error) {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+
+	if _, exists := fm.flows[flowID]; !exists {
+		return nil, fmt.Errorf("failed to get trigger flowToProcessor: %w", ErrFlowNotFound)
+	}
+
+	triggerProcessors := make([]*definitions.SimpleTriggerProcessor, 0)
+	for _, triggerProcessor := range fm.flowToTriggerProcessor[flowID] {
+		triggerProcessors = append(triggerProcessors, triggerProcessor)
+	}
+	return triggerProcessors, nil
 }
 
 func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (definitions.PaginatedData[*definitions.Flow], error) {
@@ -113,7 +130,7 @@ func (fm *InMemoryFlowManager) GetProcessorByID(flowID uuid.UUID, processorID uu
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	processors, exists := fm.processors[flowID]
+	processors, exists := fm.flowToProcessor[flowID]
 	if !exists {
 		return nil, ErrFlowNotFound
 	}
@@ -129,7 +146,7 @@ func (fm *InMemoryFlowManager) GetNextProcessors(flowID uuid.UUID, processorID u
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	processors, exists := fm.processors[flowID]
+	processors, exists := fm.flowToProcessor[flowID]
 	if !exists {
 		return nil, ErrFlowNotFound
 	}
@@ -159,17 +176,17 @@ func (fm *InMemoryFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, proces
 
 	processor.FlowOrder = referenceProcessor.FlowOrder
 
-	for _, proc := range fm.processors[flowID] {
+	for _, proc := range fm.flowToProcessor[flowID] {
 		if proc.FlowOrder >= referenceProcessor.FlowOrder {
 			proc.FlowOrder++
 		}
 	}
 
-	if fm.processors[flowID] == nil {
-		fm.processors[flowID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
+	if fm.flowToProcessor[flowID] == nil {
+		fm.flowToProcessor[flowID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
 	}
 
-	fm.processors[flowID][processor.ID] = processor
+	fm.flowToProcessor[flowID][processor.ID] = processor
 	fm.flowUpdates[flowID] = time.Now()
 	return nil
 }
@@ -185,17 +202,17 @@ func (fm *InMemoryFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, process
 
 	processor.FlowOrder = referenceProcessor.FlowOrder + 1
 
-	for _, proc := range fm.processors[flowID] {
+	for _, proc := range fm.flowToProcessor[flowID] {
 		if proc.FlowOrder > referenceProcessor.FlowOrder {
 			proc.FlowOrder++
 		}
 	}
 
-	if fm.processors[flowID] == nil {
-		fm.processors[flowID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
+	if fm.flowToProcessor[flowID] == nil {
+		fm.flowToProcessor[flowID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
 	}
 
-	fm.processors[flowID][processor.ID] = processor
+	fm.flowToProcessor[flowID][processor.ID] = processor
 	fm.flowUpdates[flowID] = time.Now()
 	return nil
 }
@@ -205,11 +222,17 @@ func (fm *InMemoryFlowManager) SaveFlow(flow *definitions.Flow) error {
 	defer fm.mu.Unlock()
 
 	fm.flows[flow.ID] = flow
-	if fm.processors[flow.ID] == nil {
-		fm.processors[flow.ID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
+	if fm.flowToProcessor[flow.ID] == nil {
+		fm.flowToProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
 	}
 	for _, processor := range flow.Processors {
-		fm.processors[flow.ID][processor.ID] = &processor
+		fm.flowToProcessor[flow.ID][processor.ID] = &processor
+	}
+	if fm.flowToTriggerProcessor[flow.ID] == nil {
+		fm.flowToTriggerProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleTriggerProcessor)
+	}
+	for _, triggerProcessor := range flow.TriggerProcessors {
+		fm.flowToTriggerProcessor[flow.ID][triggerProcessor.ID] = &triggerProcessor
 	}
 	fm.flowUpdates[flow.ID] = time.Now()
 	return nil

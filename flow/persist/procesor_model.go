@@ -17,6 +17,7 @@ type processorModel struct {
 	Configuration       map[string]any `gorm:"column:configuration;type:jsonb;not null"`
 	PreviousProcessorID uuid.UUID      `gorm:"column:previous_processor_id;type:uuid;index:idx_flow_previous_processor"`
 	NextProcessorID     uuid.UUID      `gorm:"column:next_processor_id;type:uuid;index:idx_flow_next_processor"`
+	Enabled             bool           `gorm:"column:enabled;not null;default:true"`
 }
 
 func (p *processorModel) BeforeCreate(tx *gorm.DB) (err error) {

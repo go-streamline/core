@@ -360,6 +360,7 @@ func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *proce
 		Config:     processor.Configuration,
 		MaxRetries: processor.MaxRetries,
 		LogLevel:   processor.LogLevel,
+		Enabled:    processor.Enabled,
 	}
 }
 
@@ -373,6 +374,7 @@ func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(mo
 		CronExpr:     model.CronExpr,
 		Config:       model.Configuration,
 		LogLevel:     model.LogLevel,
+		Enabled:      model.Enabled,
 	}
 }
 
@@ -386,6 +388,7 @@ func (fm *DBFlowManager) convertSimpleProcessorToProcessorModel(processor *defin
 		Configuration: processor.Config,
 		MaxRetries:    processor.MaxRetries,
 		LogLevel:      processor.LogLevel,
+		Enabled:       processor.Enabled,
 	}
 }
 
@@ -399,6 +402,7 @@ func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(tr
 		CronExpr:      triggerProcessor.CronExpr,
 		Configuration: triggerProcessor.Config,
 		LogLevel:      triggerProcessor.LogLevel,
+		Enabled:       triggerProcessor.Enabled,
 	}
 }
 
