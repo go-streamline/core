@@ -6,6 +6,7 @@ import (
 	"github.com/go-streamline/core/config"
 	"github.com/go-streamline/interfaces/definitions"
 	"github.com/go-streamline/interfaces/utils"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"os"
@@ -18,15 +19,15 @@ type DefaultWriteAheadLogger struct {
 	enabled  bool
 }
 
-func NewWriteAheadLogger(logFilePath string, conf config.WriteAheadLogging, log *logrus.Logger) (definitions.WriteAheadLogger, error) {
-	err := utils.CreateDirsIfNotExist(logFilePath, "")
+func NewWriteAheadLogger(walFilePath string, conf config.WriteAheadLogging, log *logrus.Logger) (definitions.WriteAheadLogger, error) {
+	err := utils.CreateDirsIfNotExist(walFilePath, "")
 	if err != nil {
 		return nil, err
 	}
 	walLogger := logrus.New()
 
 	walLogger.Out = &lumberjack.Logger{
-		Filename:   logFilePath,
+		Filename:   walFilePath,
 		MaxSize:    conf.MaxSizeMB,
 		MaxBackups: conf.MaxBackups,
 		MaxAge:     conf.MaxAgeDays,
@@ -38,12 +39,31 @@ func NewWriteAheadLogger(logFilePath string, conf config.WriteAheadLogging, log 
 
 	return &DefaultWriteAheadLogger{
 		logger:   walLogger,
-		filePath: logFilePath,
+		filePath: walFilePath,
 		enabled:  conf.Enabled,
 		log:      log,
 	}, nil
 }
 
+// WriteEntry writes a log entry to the WAL with the option to mark it as complete
+func (l *DefaultWriteAheadLogger) WriteEntry(entry definitions.LogEntry) {
+	if !l.enabled {
+		return
+	}
+	l.logger.WithFields(logrus.Fields{
+		"session_id":     entry.SessionID.String(),
+		"processor_name": entry.ProcessorName,
+		"processor_id":   entry.ProcessorID,
+		"flow_id":        entry.FlowID.String(),
+		"input_file":     entry.InputFile,
+		"output_file":    entry.OutputFile,
+		"flow_object":    entry.FlowObject,
+		"retry_count":    entry.RetryCount,
+		"is_complete":    entry.IsComplete,
+	}).Info("WAL entry recorded")
+}
+
+// ReadEntries reads all entries from the WAL file
 func (l *DefaultWriteAheadLogger) ReadEntries() ([]definitions.LogEntry, error) {
 	if !l.enabled {
 		return nil, nil
@@ -83,18 +103,28 @@ func (l *DefaultWriteAheadLogger) ReadEntries() ([]definitions.LogEntry, error) 
 	return entries, nil
 }
 
-func (l *DefaultWriteAheadLogger) WriteEntry(entry definitions.LogEntry) {
-	if !l.enabled {
-		return
+// ReadLastEntries retrieves the last in-progress entries per session
+func (l *DefaultWriteAheadLogger) ReadLastEntries() ([]definitions.LogEntry, error) {
+	entries, err := l.ReadEntries()
+	if err != nil {
+		return nil, err
 	}
-	l.logger.WithFields(logrus.Fields{
-		"session_id":     entry.SessionID.String(),
-		"processor_name": entry.ProcessorName,
-		"processor_id":   entry.ProcessorID,
-		"flow_id":        entry.FlowID.String(),
-		"input_file":     entry.InputFile,
-		"output_file":    entry.OutputFile,
-		"flow_object":    entry.FlowObject,
-		"retry_count":    entry.RetryCount,
-	}).Info("WAL entry recorded")
+
+	// track the last in-progress entry for each session
+	lastEntries := make(map[uuid.UUID]definitions.LogEntry)
+
+	for _, entry := range entries {
+		// only consider non-complete entries
+		if !entry.IsComplete {
+			lastEntries[entry.SessionID] = entry
+		}
+	}
+
+	// collect the last active entries
+	var result []definitions.LogEntry
+	for _, entry := range lastEntries {
+		result = append(result, entry)
+	}
+
+	return result, nil
 }

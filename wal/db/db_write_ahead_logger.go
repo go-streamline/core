@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-type DBWriteAheadLogger struct {
+type WriteAheadLogger struct {
 	db  *gorm.DB
 	log *logrus.Logger
 }
@@ -25,35 +25,32 @@ type walLogEntry struct {
 	OutputFile    string    `gorm:"type:text"`
 	FlowObject    []byte    `gorm:"type:jsonb"`
 	RetryCount    int       `gorm:"not null"`
+	IsComplete    bool      `gorm:"not null;default:false"` // indicates if the processor has completed
 	CreatedAt     time.Time `gorm:"autoCreateTime"`
 }
 
+// NewDBWriteAheadLogger creates a new logger and ensures the table is migrated.
 func NewDBWriteAheadLogger(db *gorm.DB, log *logrus.Logger) (definitions.WriteAheadLogger, error) {
 	if err := db.AutoMigrate(&walLogEntry{}); err != nil {
 		return nil, err
 	}
 
-	return &DBWriteAheadLogger{
+	return &WriteAheadLogger{
 		db:  db,
 		log: log,
 	}, nil
 }
 
-func (l *DBWriteAheadLogger) ReadEntries() ([]definitions.LogEntry, error) {
+// ReadEntries reads all WAL entries from the database.
+func (l *WriteAheadLogger) ReadEntries() ([]definitions.LogEntry, error) {
 	var walEntries []walLogEntry
 
-	subQuery := l.db.Model(&walLogEntry{}).
-		Select("session_id").
-		Where("processor_name = ?", "__end__")
-
-	// get all entries from incomplete sessions
-	err := l.db.Where("session_id NOT IN (?)", subQuery).
-		Order("created_at asc").Find(&walEntries).Error
+	err := l.db.Order("created_at asc").Find(&walEntries).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve WAL entries: %v", err)
 	}
 
-	// get the last entry for each session
+	// Map database entries to LogEntry objects
 	var logEntries []definitions.LogEntry
 	for _, walEntry := range walEntries {
 		var flowObject definitions.EngineFlowObject
@@ -71,6 +68,7 @@ func (l *DBWriteAheadLogger) ReadEntries() ([]definitions.LogEntry, error) {
 			OutputFile:    walEntry.OutputFile,
 			FlowObject:    flowObject,
 			RetryCount:    walEntry.RetryCount,
+			IsComplete:    walEntry.IsComplete, // map the completion flag
 		}
 		logEntries = append(logEntries, logEntry)
 	}
@@ -79,7 +77,52 @@ func (l *DBWriteAheadLogger) ReadEntries() ([]definitions.LogEntry, error) {
 	return logEntries, nil
 }
 
-func (l *DBWriteAheadLogger) WriteEntry(entry definitions.LogEntry) {
+// ReadLastEntries retrieves the last active entries (not completed) for each session.
+func (l *WriteAheadLogger) ReadLastEntries() ([]definitions.LogEntry, error) {
+	var walEntries []walLogEntry
+
+	// Fetch only the last incomplete entries for each session
+	subQuery := l.db.Model(&walLogEntry{}).
+		Select("session_id, MAX(created_at) AS created_at").
+		Where("is_complete = ?", false).
+		Group("session_id")
+
+	err := l.db.Joins("JOIN (?) AS sub ON wal_log_entries.session_id = sub.session_id AND wal_log_entries.created_at = sub.created_at", subQuery).
+		Order("created_at asc").
+		Find(&walEntries).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve WAL entries: %v", err)
+	}
+
+	// Map to LogEntry
+	var logEntries []definitions.LogEntry
+	for _, walEntry := range walEntries {
+		var flowObject definitions.EngineFlowObject
+		err := json.Unmarshal(walEntry.FlowObject, &flowObject)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal flow object: %v", err)
+		}
+
+		logEntry := definitions.LogEntry{
+			SessionID:     walEntry.SessionID,
+			ProcessorName: walEntry.ProcessorName,
+			ProcessorID:   walEntry.ProcessorID,
+			FlowID:        walEntry.FlowID,
+			InputFile:     walEntry.InputFile,
+			OutputFile:    walEntry.OutputFile,
+			FlowObject:    flowObject,
+			RetryCount:    walEntry.RetryCount,
+			IsComplete:    walEntry.IsComplete,
+		}
+		logEntries = append(logEntries, logEntry)
+	}
+
+	l.log.Debugf("read %d last active WAL entries from DB", len(logEntries))
+	return logEntries, nil
+}
+
+// WriteEntry writes a log entry to the WAL table in the database.
+func (l *WriteAheadLogger) WriteEntry(entry definitions.LogEntry) {
 	flowObjectBytes, err := json.Marshal(entry.FlowObject)
 	if err != nil {
 		l.log.WithError(err).Error("failed to marshal FlowObject")
@@ -96,6 +139,7 @@ func (l *DBWriteAheadLogger) WriteEntry(entry definitions.LogEntry) {
 		OutputFile:    entry.OutputFile,
 		FlowObject:    flowObjectBytes,
 		RetryCount:    entry.RetryCount,
+		IsComplete:    entry.IsComplete,
 	}
 
 	if err := l.db.Create(&walEntry).Error; err != nil {
@@ -107,5 +151,6 @@ func (l *DBWriteAheadLogger) WriteEntry(entry definitions.LogEntry) {
 		"processor_name": walEntry.ProcessorName,
 		"processor_id":   walEntry.ProcessorID,
 		"flow_id":        walEntry.FlowID.String(),
+		"is_complete":    walEntry.IsComplete,
 	}).Info("WAL entry recorded in DB")
 }
