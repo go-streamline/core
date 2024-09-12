@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/dgraph-io/ristretto"
 	"github.com/eko/gocache/lib/v4/cache"
-	ristretto_store "github.com/eko/gocache/store/ristretto/v4"
+	ristrettostore "github.com/eko/gocache/store/ristretto/v4"
 	"github.com/go-streamline/interfaces/definitions"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -19,9 +19,9 @@ var (
 	ErrReferenceProcessorNotFound       = fmt.Errorf("reference processor not found")
 	ErrCouldNotRunMigrations            = fmt.Errorf("could not run migrations")
 	ErrFailedToGetTotalCount            = fmt.Errorf("failed to get total count")
-	ErrFailedToUpdateFlowOrder          = fmt.Errorf("failed to update flow order")
 	ErrFailedToCreateProcessor          = fmt.Errorf("failed to create processor")
 	ErrFailedToUpdateReferenceProcessor = fmt.Errorf("failed to update reference processor")
+	ErrProcessorNotFound                = fmt.Errorf("processor not found")
 )
 
 type DBFlowManager struct {
@@ -47,14 +47,32 @@ func NewDBFlowManager(db *gorm.DB) (definitions.FlowManager, error) {
 		return nil, fmt.Errorf("%w: %s", ErrFailedToInitializeCache, err)
 	}
 
-	ristrettoStore := ristretto_store.NewRistretto(ristrettoCache)
+	ristrettoStore := ristrettostore.NewRistretto(ristrettoCache)
 	flowCache := cache.New[*definitions.Flow](ristrettoStore)
 
 	return &DBFlowManager{
 		db:        db,
 		flowCache: flowCache,
-		ctx:       context.Background(), // Store a context for cache operations
+		ctx:       context.Background(),
 	}, nil
+}
+
+func (fm *DBFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+	flow, err := fm.GetFlowByID(flowID)
+	if err != nil || flow == nil {
+		return nil, err
+	}
+
+	var processorModels []processorModel
+	query := fm.db.Where("flow_id = ?", flowID).Find(&processorModels)
+	if query.Error != nil {
+		if errors.Is(query.Error, gorm.ErrRecordNotFound) {
+			return []definitions.SimpleProcessor{}, nil
+		}
+		return nil, query.Error
+	}
+
+	return fm.convertProcessorsToSimpleProcessors(processorModels), nil
 }
 
 // ListFlows lists all flows with pagination and filters based on the last update time.
@@ -115,68 +133,7 @@ func (fm *DBFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]definiti
 		return nil, err
 	}
 
-	var firstProcessors []definitions.SimpleProcessor
-	for _, processor := range flow.Processors {
-		if processor.FlowOrder == 1 { // Assuming FlowOrder == 1 indicates the first processor
-			firstProcessors = append(firstProcessors, processor)
-		}
-	}
-	return firstProcessors, nil
-}
-
-// GetLastProcessorForFlow retrieves the last processor in a flow.
-func (fm *DBFlowManager) GetLastProcessorForFlow(flowID uuid.UUID) (*definitions.SimpleProcessor, error) {
-	flow, err := fm.GetFlowByID(flowID)
-	if err != nil || flow == nil {
-		return nil, err
-	}
-
-	var lastProcessor *definitions.SimpleProcessor
-	maxOrder := 0
-	for _, processor := range flow.Processors {
-		if processor.FlowOrder > maxOrder {
-			lastProcessor = &processor
-			maxOrder = processor.FlowOrder
-		}
-	}
-	return lastProcessor, nil
-}
-
-// GetProcessorByID retrieves a processor by its ID within a flow.
-func (fm *DBFlowManager) GetProcessorByID(flowID uuid.UUID, processorID uuid.UUID) (*definitions.SimpleProcessor, error) {
-	flow, err := fm.GetFlowByID(flowID)
-	if err != nil || flow == nil {
-		return nil, err
-	}
-
-	for _, processor := range flow.Processors {
-		if processor.ID == processorID {
-			return &processor, nil
-		}
-	}
-	return nil, nil
-}
-
-// GetNextProcessors retrieves the next processors in the flow after the given processor.
-func (fm *DBFlowManager) GetNextProcessors(flowID uuid.UUID, processorID uuid.UUID) ([]definitions.SimpleProcessor, error) {
-	flow, err := fm.GetFlowByID(flowID)
-	if err != nil || flow == nil {
-		return nil, err
-	}
-
-	var nextProcessors []definitions.SimpleProcessor
-	for _, processor := range flow.Processors {
-		if processor.ID == processorID {
-			nextOrder := processor.FlowOrder + 1
-			for _, nextProcessor := range flow.Processors {
-				if nextProcessor.FlowOrder == nextOrder {
-					nextProcessors = append(nextProcessors, nextProcessor)
-				}
-			}
-			break
-		}
-	}
-	return nextProcessors, nil
+	return flow.Processors, nil
 }
 
 // GetTriggerProcessorsForFlow retrieves the trigger processors for a given flow.
@@ -184,6 +141,9 @@ func (fm *DBFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]*defin
 	var triggerProcessorModels []*triggerProcessorModel
 	err := fm.db.Where("flow_id = ?", flowID).Find(&triggerProcessorModels).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProcessorNotFound
+		}
 		return nil, err
 	}
 
@@ -194,7 +154,22 @@ func (fm *DBFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]*defin
 	return triggerProcessors, nil
 }
 
+func (fm *DBFlowManager) GetProcessors(ids []uuid.UUID) ([]definitions.SimpleProcessor, error) {
+	var models []processorModel
+	err := fm.db.Find(&models, "id IN ?", ids).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProcessorNotFound
+		}
+		return nil, err
+	}
+
+	return fm.convertProcessorsToSimpleProcessors(models), nil
+}
+
 // AddProcessorToFlowBefore adds a processor to the flow before a reference processor.
+// todo: change it so a first processor would move to be next
 func (fm *DBFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, processor *definitions.SimpleProcessor, referenceProcessorID uuid.UUID) error {
 	return fm.db.Transaction(func(tx *gorm.DB) error {
 		referenceProcessor, err := fm.GetProcessorByID(flowID, referenceProcessorID)
@@ -205,29 +180,22 @@ func (fm *DBFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, processor *d
 			return ErrReferenceProcessorNotFound
 		}
 
-		err = tx.Model(&processorModel{}).
-			Where("flow_id = ? AND flow_order >= ?", flowID, referenceProcessor.FlowOrder).
-			Update("flow_order", gorm.Expr("flow_order + ?", 1)).Error
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrFailedToUpdateFlowOrder, err)
-		}
-		processor.FlowOrder = referenceProcessor.FlowOrder
+		// Set this processor's next to the reference processor
+		processor.NextProcessorIDs = []uuid.UUID{referenceProcessorID}
 
 		modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
 		modelProcessor.FlowID = flowID
+
 		err = tx.Create(modelProcessor).Error
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
 		}
 
-		err = tx.Model(&processorModel{}).
-			Where("id = ?", modelProcessor.ID).
-			Update("next_processor_id", referenceProcessorID).Error
+		err = tx.Save(fm.convertSimpleProcessorToProcessorModel(referenceProcessor)).Error
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFailedToUpdateReferenceProcessor, err)
 		}
 
-		// Invalidate cache for the flow
 		_ = fm.flowCache.Delete(fm.ctx, flowID.String())
 
 		return nil
@@ -245,29 +213,22 @@ func (fm *DBFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, processor *de
 			return ErrReferenceProcessorNotFound
 		}
 
-		processor.FlowOrder = referenceProcessor.FlowOrder + 1
-		modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
-		err = tx.Model(&processorModel{}).
-			Where("flow_id = ? AND flow_order > ?", flowID, referenceProcessor.FlowOrder).
-			Update("flow_order", gorm.Expr("flow_order + ?", 1)).Error
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrFailedToUpdateFlowOrder, err)
-		}
+		// Set the reference processor's next to this processor
+		referenceProcessor.NextProcessorIDs = append(referenceProcessor.NextProcessorIDs, processor.ID)
 
+		modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
 		modelProcessor.FlowID = flowID
+
 		err = tx.Create(modelProcessor).Error
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
 		}
 
-		err = tx.Model(&processorModel{}).
-			Where("flow_id = ? AND id = ?", referenceProcessorID).
-			Update("next_processor_id", modelProcessor.ID).Error
+		err = tx.Save(fm.convertSimpleProcessorToProcessorModel(referenceProcessor)).Error
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFailedToUpdateReferenceProcessor, err)
 		}
 
-		// Invalidate cache for the flow
 		_ = fm.flowCache.Delete(fm.ctx, flowID.String())
 
 		return nil
@@ -302,6 +263,39 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 
 		return nil
 	})
+}
+
+// GetProcessorByID retrieves a processor by its ID within a flow.
+func (fm *DBFlowManager) GetProcessorByID(flowID uuid.UUID, processorID uuid.UUID) (*definitions.SimpleProcessor, error) {
+	flow, err := fm.GetFlowByID(flowID)
+	if err != nil || flow == nil {
+		return nil, err
+	}
+
+	for _, processor := range flow.Processors {
+		if processor.ID == processorID {
+			return &processor, nil
+		}
+	}
+	return nil, nil
+}
+
+// GetLastProcessorForFlow retrieves the last processor(s) for a flow.
+// This function identifies processors that do not have any next processors.
+func (fm *DBFlowManager) GetLastProcessorForFlow(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+	flow, err := fm.GetFlowByID(flowID)
+	if err != nil || flow == nil {
+		return nil, err
+	}
+
+	var lastProcessors []definitions.SimpleProcessor
+	for _, processor := range flow.Processors {
+		// Last processors are those without next processors
+		if len(processor.NextProcessorIDs) == 0 {
+			lastProcessors = append(lastProcessors, processor)
+		}
+	}
+	return lastProcessors, nil
 }
 
 // GetLastUpdateTime retrieves the last update time for the specified flow IDs.
@@ -352,15 +346,15 @@ func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(trigg
 
 func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *processorModel) *definitions.SimpleProcessor {
 	return &definitions.SimpleProcessor{
-		ID:         processor.ID,
-		FlowID:     processor.FlowID,
-		Name:       processor.Name,
-		Type:       processor.Type,
-		FlowOrder:  processor.FlowOrder,
-		Config:     processor.Configuration,
-		MaxRetries: processor.MaxRetries,
-		LogLevel:   processor.LogLevel,
-		Enabled:    processor.Enabled,
+		ID:               processor.ID,
+		FlowID:           processor.FlowID,
+		Name:             processor.Name,
+		Type:             processor.Type,
+		Config:           processor.Configuration,
+		MaxRetries:       processor.MaxRetries,
+		LogLevel:         processor.LogLevel,
+		Enabled:          processor.Enabled,
+		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors
 	}
 }
 
@@ -380,15 +374,15 @@ func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(mo
 
 func (fm *DBFlowManager) convertSimpleProcessorToProcessorModel(processor *definitions.SimpleProcessor) *processorModel {
 	return &processorModel{
-		ID:            processor.ID,
-		FlowID:        processor.FlowID,
-		Name:          processor.Name,
-		Type:          processor.Type,
-		FlowOrder:     processor.FlowOrder,
-		Configuration: processor.Config,
-		MaxRetries:    processor.MaxRetries,
-		LogLevel:      processor.LogLevel,
-		Enabled:       processor.Enabled,
+		ID:               processor.ID,
+		FlowID:           processor.FlowID,
+		Name:             processor.Name,
+		Type:             processor.Type,
+		Configuration:    processor.Config,
+		MaxRetries:       processor.MaxRetries,
+		LogLevel:         processor.LogLevel,
+		Enabled:          processor.Enabled,
+		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors
 	}
 }
 
@@ -422,8 +416,8 @@ func (fm *DBFlowManager) convertFlowToFlowModel(flow *definitions.Flow) *flowMod
 		ID:          flow.ID,
 		Name:        flow.Name,
 		Description: flow.Description,
-		Processors:  make([]processorModel, len(flow.Processors)),
 		Active:      flow.Active,
+		Processors:  make([]processorModel, len(flow.Processors)),
 	}
 	for i, processor := range flow.Processors {
 		modelFlow.Processors[i] = *fm.convertSimpleProcessorToProcessorModel(&processor)
