@@ -1,4 +1,4 @@
-package enginetests
+package mocks
 
 import (
 	"github.com/go-streamline/interfaces/definitions"
