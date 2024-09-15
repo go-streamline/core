@@ -30,11 +30,6 @@ func (m *MockProcessor) Close() error {
 	return args.Error(0)
 }
 
-func (m *MockProcessor) GetID() string {
-	args := m.Called()
-	return args.String(0)
-}
-
 func (m *MockProcessor) Name() string {
 	args := m.Called()
 	return args.String(0)
