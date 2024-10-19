@@ -11,6 +11,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var (
+	ErrFailedToCreateZnode        = errors.New("failed to create znode for leader election")
+	ErrFailedToCheckIfZnodeExists = errors.New("failed to check if znode exists")
+	ErrFailedToRetrieveChildren   = errors.New("failed to retrieve children for leader election")
+	ErrorNoEligibleLeaderNodes    = errors.New("no eligible leader nodes found")
+	ErrFailedToGetZnodeData       = errors.New("failed to get znode data")
+)
+
 type leaderSelector struct {
 	conn             *zk.Conn
 	znodePath        string
@@ -23,10 +31,11 @@ type leaderSelector struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	nodeChangeCh     chan []string // Channel to notify about node changes
+	lockName         string
 }
 
 // NewZookeeperLeaderSelector creates a new instance of the leader selector for Zookeeper.
-func NewZookeeperLeaderSelector(conn *zk.Conn, znodePath string, log *logrus.Logger) definitions.LeaderSelector {
+func NewZookeeperLeaderSelector(conn *zk.Conn, znodePath string, log *logrus.Logger, lockName string) definitions.LeaderSelector {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &leaderSelector{
 		conn:         conn,
@@ -35,6 +44,7 @@ func NewZookeeperLeaderSelector(conn *zk.Conn, znodePath string, log *logrus.Log
 		ctx:          ctx,
 		cancel:       cancel,
 		nodeChangeCh: make(chan []string, 1),
+		lockName:     lockName,
 	}
 }
 
@@ -67,7 +77,7 @@ func (z *leaderSelector) Nodes() ([]string, error) {
 
 	var nodes []string
 	for _, child := range children {
-		if len(child) >= len("leader_") && child[:len("leader_")] == "leader_" {
+		if len(child) >= len(z.lockName) && child[:len(z.lockName)] == z.lockName {
 			data, _, err := z.conn.Get(z.znodePath + "/" + child)
 			if err != nil {
 				z.log.WithError(err).Errorf("failed to retrieve data for child %s", child)
@@ -98,11 +108,11 @@ func (z *leaderSelector) Close() error {
 // createZnode creates the znode for leader election.
 func (z *leaderSelector) createZnode() error {
 	flags := int32(zk.FlagEphemeralSequential)
-	path := z.znodePath + "/leader_"
+	path := z.znodePath + "/" + z.lockName
 	createdPath, err := CreateFullPath(z.conn, path, nil, flags)
 	if err != nil {
 		z.log.WithError(err).Error("failed to create znode for leader election")
-		return err
+		return ErrFailedToCreateZnode
 	}
 	z.nodeName = createdPath
 	return nil
@@ -122,10 +132,10 @@ func (z *leaderSelector) tryElectLeader() (bool, error) {
 		exists, _, err := z.conn.Exists(z.nodeName)
 		if err != nil {
 			z.log.WithError(err).Error("failed to check existence of znode")
-			return false, err
+			return false, ErrFailedToCheckIfZnodeExists
 		}
 		if !exists {
-			z.log.Warnf("znode not found, attempting to create a new znode")
+			z.log.Infof("znode not found, attempting to create a new znode")
 			err = z.createZnode()
 			if err != nil {
 				return false, err
@@ -136,19 +146,19 @@ func (z *leaderSelector) tryElectLeader() (bool, error) {
 	children, _, err := z.conn.Children(z.znodePath)
 	if err != nil {
 		z.log.WithError(err).Error("failed to retrieve children for leader election")
-		return false, err
+		return false, ErrFailedToRetrieveChildren
 	}
 
 	// Filter and sort the children to find the minimum node with the correct prefix
 	var eligibleChildren []string
 	for _, child := range children {
-		if len(child) >= len("leader_") && child[:len("leader_")] == "leader_" {
+		if len(child) >= len(z.lockName) && child[:len(z.lockName)] == z.lockName {
 			eligibleChildren = append(eligibleChildren, child)
 		}
 	}
 
 	if len(eligibleChildren) == 0 {
-		return false, errors.New("no eligible leader nodes found")
+		return false, ErrorNoEligibleLeaderNodes
 	}
 
 	minNode := eligibleChildren[0]
@@ -162,7 +172,7 @@ func (z *leaderSelector) tryElectLeader() (bool, error) {
 	data, _, err := z.conn.Get(minNodePath)
 	if err != nil {
 		z.log.WithError(err).Error("failed to get data for current leader")
-		return false, err
+		return false, ErrFailedToGetZnodeData
 	}
 
 	z.currentLeader = string(data)
@@ -189,7 +199,7 @@ func (z *leaderSelector) monitorNodeChanges() {
 
 		var nodes []string
 		for _, child := range children {
-			if len(child) >= len("leader_") && child[:len("leader_")] == "leader_" {
+			if len(child) >= len(z.lockName) && child[:len(z.lockName)] == z.lockName {
 				data, _, err := z.conn.Get(z.znodePath + "/" + child)
 				if err != nil {
 					z.log.WithError(err).Errorf("failed to retrieve data for child %s", child)
@@ -207,8 +217,7 @@ func (z *leaderSelector) monitorNodeChanges() {
 				case z.nodeChangeCh <- nodes:
 					// Successfully sent notification
 				default:
-					// Channel is full, dropping notification to avoid infinite loop
-					z.log.Warn("nodeChangeCh is full, dropping notification to prevent infinite loop")
+					z.log.Warn("nodeChangeCh is full, dropping notification...")
 				}
 				// Re-check leadership status after nodes change
 				_, _ = z.tryElectLeader()
@@ -250,7 +259,7 @@ func (z *leaderSelector) monitorConnection() {
 				z.updateLeaderStatus(false)
 
 				// Wait until the connection is re-established
-				for state == zk.StateDisconnected {
+				for state == zk.StateDisconnected || state == zk.StateConnecting {
 					time.Sleep(5 * time.Second)
 					state = z.conn.State()
 				}
@@ -258,7 +267,7 @@ func (z *leaderSelector) monitorConnection() {
 				z.log.Info("reconnected to Zookeeper, attempting to reacquire leadership")
 				_, _ = z.tryElectLeader()
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}
 }
