@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-func CreateFullPath(conn *zk.Conn, path string, data []byte, flags int32) (string, error) {
+// CreateFullPath creates a path in Zookeeper and all its parent nodes if they do not exist.
+// If data is nil, the hostname of the current machine is used as the data.
+// Returns the created path and the data as a string.
+func CreateFullPath(conn *zk.Conn, path string, data []byte, flags int32) (string, string, error) {
 	parts := splitPath(path)
 	// drop last part
 	parts = parts[:len(parts)-1]
@@ -16,12 +19,12 @@ func CreateFullPath(conn *zk.Conn, path string, data []byte, flags int32) (strin
 		currentPath += "/" + part
 		exists, _, err := conn.Exists(currentPath)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if !exists {
 			_, err = conn.Create(currentPath, []byte{}, 0, zk.WorldACL(zk.PermAll))
 			if err != nil && !errors.Is(err, zk.ErrNodeExists) {
-				return "", err
+				return "", "", err
 			}
 		}
 	}
@@ -29,12 +32,13 @@ func CreateFullPath(conn *zk.Conn, path string, data []byte, flags int32) (strin
 	if data == nil {
 		host, err := os.Hostname()
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		data = []byte(host)
 	}
-	return conn.Create(path, data, flags, zk.WorldACL(zk.PermAll))
+	createdPath, err := conn.Create(path, data, flags, zk.WorldACL(zk.PermAll))
+	return createdPath, string(data), err
 }
 
 func splitPath(path string) []string {

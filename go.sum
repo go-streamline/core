@@ -83,8 +83,8 @@ github.com/go-logfmt/logfmt v0.4.0/go.mod h1:3RMwSq7FuexP4Kalkev3ejPJsZTpXXBr9+V
 github.com/go-logfmt/logfmt v0.5.0/go.mod h1:wCYkCAKZfumFQihp8CzCvQ3paCTfi41vtzG1KdI/P7A=
 github.com/go-logfmt/logfmt v0.5.1/go.mod h1:WYhtIu8zTZfxdn5+rREduYbwxfcBr/Vr6KEVveWlfTs=
 github.com/go-stack/stack v1.8.0/go.mod h1:v0f6uXyyMGvRgIKkXu+yp6POWl0qKG85gN/melR3HDY=
-github.com/go-streamline/interfaces v0.1.1-0.20241018103956-08c9ba7ddb50 h1:SLtHMZ0qCsGrHvZolE5iXuxIyAhGSlLbjMnNQIRnZYE=
-github.com/go-streamline/interfaces v0.1.1-0.20241018103956-08c9ba7ddb50/go.mod h1:fkb3uJI4B2+3dcWUoCww0fSaWjIMiYfFkmxBhsoSyZg=
+github.com/go-streamline/interfaces v0.1.1-0.20241024100241-8057c4e693f0 h1:uapAS6aKTr2KjGluETyNYH4lQ96cOkzFQdEOEqhgj4k=
+github.com/go-streamline/interfaces v0.1.1-0.20241024100241-8057c4e693f0/go.mod h1:fkb3uJI4B2+3dcWUoCww0fSaWjIMiYfFkmxBhsoSyZg=
 github.com/go-zookeeper/zk v1.0.4 h1:DPzxraQx7OrPyXq2phlGlNSIyWEsAox0RJmjTseMV6I=
 github.com/go-zookeeper/zk v1.0.4/go.mod h1:nOB03cncLtlp4t+UAkGSV+9beXP/akpekBwL+UX1Qcw=
 github.com/gogo/protobuf v1.1.1/go.mod h1:r8qH/GZQm5c6nD/R0oafs1akxWv10x8SbQlK7atdtwQ=

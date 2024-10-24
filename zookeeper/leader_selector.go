@@ -20,18 +20,19 @@ var (
 )
 
 type leaderSelector struct {
-	conn             *zk.Conn
-	znodePath        string
-	nodeName         string // Store the created node name
-	currentLeader    string // Hostname of the current leader
-	isLeader         bool
-	leaderMutex      sync.Mutex
-	electLeaderMutex sync.Mutex
-	log              *logrus.Logger
-	ctx              context.Context
-	cancel           context.CancelFunc
-	nodeChangeCh     chan []string // Channel to notify about node changes
-	lockName         string
+	conn               *zk.Conn
+	znodePath          string
+	nodeName           string // Store the created node name
+	currentParticipant string
+	currentLeader      string // Hostname of the current leader
+	isLeader           bool
+	leaderMutex        sync.Mutex
+	electLeaderMutex   sync.Mutex
+	log                *logrus.Logger
+	ctx                context.Context
+	cancel             context.CancelFunc
+	nodeChangeCh       chan []string // Channel to notify about node changes
+	lockName           string
 }
 
 // NewZookeeperLeaderSelector creates a new instance of the leader selector for Zookeeper.
@@ -48,13 +49,13 @@ func NewZookeeperLeaderSelector(conn *zk.Conn, znodePath string, log *logrus.Log
 	}
 }
 
-// NodeName returns the name of the leader node.
-func (z *leaderSelector) NodeName() string {
-	return z.currentLeader
+// NodeName returns the name of the current participant's host
+func (z *leaderSelector) ParticipantName() string {
+	return z.currentParticipant
 }
 
 // NodeChangeChannel returns a channel that can be used to receive node change notifications.
-func (z *leaderSelector) NodeChangeChannel() <-chan []string {
+func (z *leaderSelector) ParticipantsChangeChannel() <-chan []string {
 	return z.nodeChangeCh
 }
 
@@ -69,7 +70,7 @@ func (z *leaderSelector) Start() error {
 	return err
 }
 
-func (z *leaderSelector) Nodes() ([]string, error) {
+func (z *leaderSelector) Participants() ([]string, error) {
 	children, _, err := z.conn.Children(z.znodePath)
 	if err != nil {
 		return nil, err
@@ -109,11 +110,12 @@ func (z *leaderSelector) Close() error {
 func (z *leaderSelector) createZnode() error {
 	flags := int32(zk.FlagEphemeralSequential)
 	path := z.znodePath + "/" + z.lockName
-	createdPath, err := CreateFullPath(z.conn, path, nil, flags)
+	createdPath, data, err := CreateFullPath(z.conn, path, nil, flags)
 	if err != nil {
 		z.log.WithError(err).Error("failed to create znode for leader election")
 		return ErrFailedToCreateZnode
 	}
+	z.currentParticipant = data
 	z.nodeName = createdPath
 	return nil
 }
@@ -177,9 +179,9 @@ func (z *leaderSelector) tryElectLeader() (bool, error) {
 
 	z.currentLeader = string(data)
 
+	z.log.Infof("node %s has acquired leadership", z.nodeName)
 	if minNodePath == z.nodeName {
 		z.updateLeaderStatus(true)
-		z.log.Infof("node %s has acquired leadership", z.nodeName)
 		return true, nil
 	}
 
