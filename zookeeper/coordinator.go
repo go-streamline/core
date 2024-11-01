@@ -21,21 +21,26 @@ import (
 // If current node is the coordinator, it assigns a leader for the trigger processor and updates the znode.
 // If current node is not the coordinator, it watches the znode for the trigger processor to check if it is the leader.
 type coordinator struct {
-	leaderSelector definitions.LeaderSelector // LeaderSelector to determine if the current node is the coordinator
-	conn           *zk.Conn                   // Zookeeper connection
-	tpLeaderPath   string                     // Path where the leader nodes for each TP are stored
-	tpLeaders      map[uuid.UUID]string       // Map of trigger processors and their assigned leaders (tpID -> leaderNode)
-	roundRobinIdx  int                        // Index for round-robin leader selection
-	mu             sync.Mutex                 // Mutex to protect tpLeaders
+	leaderSelector definitions.LeaderSelector    // LeaderSelector to determine if the current node is the coordinator
+	conn           coordinatorZookeeperInterface // Zookeeper connection
+	tpLeaderPath   string                        // Path where the leader nodes for each TP are stored
+	tpLeaders      map[uuid.UUID]string          // Map of trigger processors and their assigned leaders (tpID -> leaderNode)
+	roundRobinIdx  int                           // Index for round-robin leader selection
+	mu             sync.Mutex                    // Mutex to protect tpLeaders
 	log            *logrus.Logger
 	ctx            context.Context
 	cancel         context.CancelFunc
 	nodes          []string // Cached list of nodes in the cluster
+}
 
+type coordinatorZookeeperInterface interface {
+	zkCreateFullPathInterface
+	Get(path string) ([]byte, *zk.Stat, error)
+	Set(path string, data []byte, version int32) (*zk.Stat, error)
 }
 
 // NewCoordinator creates a new Coordinator instance.
-func NewCoordinator(leaderSelector definitions.LeaderSelector, conn *zk.Conn, tpLeaderPath string, log *logrus.Logger) definitions.Coordinator {
+func NewCoordinator(leaderSelector definitions.LeaderSelector, conn coordinatorZookeeperInterface, tpLeaderPath string, log *logrus.Logger) definitions.Coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &coordinator{
 		leaderSelector: leaderSelector,
@@ -95,7 +100,14 @@ func (c *coordinator) getOrAssignLeader(tpID uuid.UUID) (bool, error) {
 
 func (c *coordinator) assignNewLeaderNode(tpID uuid.UUID) (string, error) {
 	if (len(c.nodes)) == 0 {
-		return "", fmt.Errorf("no nodes available for leader selection")
+		nodes, err := c.leaderSelector.Participants()
+		if err != nil {
+			return "", err
+		}
+		if len(nodes) == 0 {
+			return "", errors.New("no nodes available for leader selection")
+		}
+		c.nodes = nodes
 	}
 
 	// Round-robin leader selection

@@ -19,8 +19,16 @@ var (
 	ErrFailedToGetZnodeData       = errors.New("failed to get znode data")
 )
 
+type leaderSelectorZookeeperInterface interface {
+	zkCreateFullPathInterface
+	Children(path string) ([]string, *zk.Stat, error)
+	ChildrenW(path string) ([]string, *zk.Stat, <-chan zk.Event, error)
+	Get(path string) ([]byte, *zk.Stat, error)
+	State() zk.State
+}
+
 type leaderSelector struct {
-	conn               *zk.Conn
+	conn               leaderSelectorZookeeperInterface
 	znodePath          string
 	nodeName           string // Store the created node name
 	currentParticipant string
@@ -36,7 +44,7 @@ type leaderSelector struct {
 }
 
 // NewZookeeperLeaderSelector creates a new instance of the leader selector for Zookeeper.
-func NewZookeeperLeaderSelector(conn *zk.Conn, znodePath string, log *logrus.Logger, lockName string) definitions.LeaderSelector {
+func NewZookeeperLeaderSelector(conn leaderSelectorZookeeperInterface, znodePath string, log *logrus.Logger, lockName string) definitions.LeaderSelector {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &leaderSelector{
 		conn:         conn,
@@ -49,12 +57,12 @@ func NewZookeeperLeaderSelector(conn *zk.Conn, znodePath string, log *logrus.Log
 	}
 }
 
-// NodeName returns the name of the current participant's host
+// ParticipantName returns the name of the current participant's host
 func (z *leaderSelector) ParticipantName() string {
 	return z.currentParticipant
 }
 
-// NodeChangeChannel returns a channel that can be used to receive node change notifications.
+// ParticipantsChangeChannel returns a channel that can be used to receive node change notifications.
 func (z *leaderSelector) ParticipantsChangeChannel() <-chan []string {
 	return z.nodeChangeCh
 }
