@@ -7,10 +7,15 @@ import (
 	"strings"
 )
 
+type zkCreateFullPathInterface interface {
+	Exists(path string) (bool, *zk.Stat, error)
+	Create(path string, data []byte, flags int32, acl []zk.ACL) (string, error)
+}
+
 // CreateFullPath creates a path in Zookeeper and all its parent nodes if they do not exist.
 // If data is nil, the hostname of the current machine is used as the data.
 // Returns the created path and the data as a string.
-func CreateFullPath(conn *zk.Conn, path string, data []byte, flags int32) (string, string, error) {
+func CreateFullPath(conn zkCreateFullPathInterface, path string, data []byte, flags int32) (string, string, error) {
 	parts := splitPath(path)
 	// drop last part
 	parts = parts[:len(parts)-1]
