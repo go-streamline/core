@@ -352,6 +352,7 @@ func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *proce
 		Type:             processor.Type,
 		Config:           processor.Configuration,
 		MaxRetries:       processor.MaxRetries,
+		BackoffSeconds:   processor.BackoffSeconds,
 		LogLevel:         processor.LogLevel,
 		Enabled:          processor.Enabled,
 		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors
@@ -381,6 +382,7 @@ func (fm *DBFlowManager) convertSimpleProcessorToProcessorModel(processor *defin
 		Type:             processor.Type,
 		Configuration:    processor.Config,
 		MaxRetries:       processor.MaxRetries,
+		BackoffSeconds:   processor.BackoffSeconds,
 		LogLevel:         processor.LogLevel,
 		Enabled:          processor.Enabled,
 		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors

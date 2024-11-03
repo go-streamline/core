@@ -12,6 +12,7 @@ type processorModel struct {
 	Name                 string         `gorm:"type:varchar(255);not null"`
 	Type                 string         `gorm:"type:varchar(255);not null"`
 	MaxRetries           int            `gorm:"column:max_retries;default:3"`
+	BackoffSeconds       int            `gorm:"column:backoff_seconds;default:1"`
 	LogLevel             logrus.Level   `gorm:"column:log_level;not null;default:'info'"`
 	Configuration        map[string]any `gorm:"column:configuration;type:jsonb;not null"`
 	NextProcessorIDs     []uuid.UUID    `gorm:"column:next_processor_ids;type:uuid[];index:idx_flow_next_processor"`
