@@ -370,6 +370,7 @@ func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(mo
 		Config:       model.Configuration,
 		LogLevel:     model.LogLevel,
 		Enabled:      model.Enabled,
+		SingleNode:   model.SingleNode,
 	}
 }
 
@@ -398,6 +399,7 @@ func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(tr
 		CronExpr:      triggerProcessor.CronExpr,
 		Configuration: triggerProcessor.Config,
 		LogLevel:      triggerProcessor.LogLevel,
+		SingleNode:    triggerProcessor.SingleNode,
 		Enabled:       triggerProcessor.Enabled,
 	}
 }
