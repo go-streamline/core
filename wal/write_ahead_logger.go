@@ -20,7 +20,7 @@ type DefaultWriteAheadLogger struct {
 }
 
 func NewWriteAheadLogger(walFilePath string, conf config.WriteAheadLogging, log *logrus.Logger) (definitions.WriteAheadLogger, error) {
-	err := utils.CreateDirsIfNotExist(walFilePath, "")
+	err := utils.CreateDirsIfNotExist(walFilePath)
 	if err != nil {
 		return nil, err
 	}
