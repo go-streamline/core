@@ -345,6 +345,10 @@ func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(trigg
 }
 
 func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *processorModel) *definitions.SimpleProcessor {
+	logLevel, err := logrus.ParseLevel(processor.LogLevel)
+	if err != nil {
+		logLevel = logrus.InfoLevel
+	}
 	return &definitions.SimpleProcessor{
 		ID:               processor.ID,
 		FlowID:           processor.FlowID,
@@ -353,13 +357,17 @@ func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *proce
 		Config:           processor.Configuration,
 		MaxRetries:       processor.MaxRetries,
 		BackoffSeconds:   processor.BackoffSeconds,
-		LogLevel:         processor.LogLevel,
+		LogLevel:         logLevel,
 		Enabled:          processor.Enabled,
 		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors
 	}
 }
 
 func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(model *triggerProcessorModel) *definitions.SimpleTriggerProcessor {
+	logLevel, err := logrus.ParseLevel(model.LogLevel)
+	if err != nil {
+		logLevel = logrus.InfoLevel
+	}
 	return &definitions.SimpleTriggerProcessor{
 		ID:           model.ID,
 		FlowID:       model.FlowID,
@@ -368,7 +376,7 @@ func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(mo
 		ScheduleType: definitions.ScheduleType(model.ScheduleType),
 		CronExpr:     model.CronExpr,
 		Config:       model.Configuration,
-		LogLevel:     model.LogLevel,
+		LogLevel:     logLevel,
 		Enabled:      model.Enabled,
 		SingleNode:   model.SingleNode,
 	}
@@ -383,7 +391,7 @@ func (fm *DBFlowManager) convertSimpleProcessorToProcessorModel(processor *defin
 		Configuration:    processor.Config,
 		MaxRetries:       processor.MaxRetries,
 		BackoffSeconds:   processor.BackoffSeconds,
-		LogLevel:         processor.LogLevel,
+		LogLevel:         processor.LogLevel.String(),
 		Enabled:          processor.Enabled,
 		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors
 	}
@@ -398,7 +406,7 @@ func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(tr
 		ScheduleType:  int(triggerProcessor.ScheduleType),
 		CronExpr:      triggerProcessor.CronExpr,
 		Configuration: triggerProcessor.Config,
-		LogLevel:      triggerProcessor.LogLevel,
+		LogLevel:      triggerProcessor.LogLevel.String(),
 		SingleNode:    triggerProcessor.SingleNode,
 		Enabled:       triggerProcessor.Enabled,
 	}
