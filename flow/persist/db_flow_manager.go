@@ -57,7 +57,7 @@ func NewDBFlowManager(db *gorm.DB) (definitions.FlowManager, error) {
 	}, nil
 }
 
-func (fm *DBFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *DBFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	flow, err := fm.GetFlowByID(flowID)
 	if err != nil || flow == nil {
 		return nil, err
@@ -67,7 +67,7 @@ func (fm *DBFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]definitions.Simp
 	query := fm.db.Where("flow_id = ?", flowID).Find(&processorModels)
 	if query.Error != nil {
 		if errors.Is(query.Error, gorm.ErrRecordNotFound) {
-			return []definitions.SimpleProcessor{}, nil
+			return []*definitions.SimpleProcessor{}, nil
 		}
 		return nil, query.Error
 	}
@@ -127,7 +127,7 @@ func (fm *DBFlowManager) GetFlowByID(flowID uuid.UUID) (*definitions.Flow, error
 }
 
 // GetFirstProcessorsForFlow retrieves the first processors in a flow.
-func (fm *DBFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *DBFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	flow, err := fm.GetFlowByID(flowID)
 	if err != nil || flow == nil {
 		return nil, err
@@ -154,7 +154,7 @@ func (fm *DBFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]*defin
 	return triggerProcessors, nil
 }
 
-func (fm *DBFlowManager) GetProcessors(ids []uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *DBFlowManager) GetProcessors(ids []uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	var models []processorModel
 	err := fm.db.Find(&models, "id IN ?", ids).Error
 
@@ -243,7 +243,7 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 			return err
 		}
 		for _, processor := range flow.Processors {
-			modelProcessor := fm.convertSimpleProcessorToProcessorModel(&processor)
+			modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
 			modelProcessor.FlowID = modelFlow.ID
 			if err := tx.Save(modelProcessor).Error; err != nil {
 				return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
@@ -251,7 +251,7 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 		}
 
 		for _, triggerProcessor := range flow.TriggerProcessors {
-			modelTriggerProcessor := fm.convertSimpleTriggerProcessorToTriggerProcessorModel(&triggerProcessor)
+			modelTriggerProcessor := fm.convertSimpleTriggerProcessorToTriggerProcessorModel(triggerProcessor)
 			modelTriggerProcessor.FlowID = modelFlow.ID
 			if err := tx.Save(modelTriggerProcessor).Error; err != nil {
 				return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
@@ -274,7 +274,7 @@ func (fm *DBFlowManager) GetProcessorByID(flowID uuid.UUID, processorID uuid.UUI
 
 	for _, processor := range flow.Processors {
 		if processor.ID == processorID {
-			return &processor, nil
+			return processor, nil
 		}
 	}
 	return nil, nil
@@ -282,13 +282,13 @@ func (fm *DBFlowManager) GetProcessorByID(flowID uuid.UUID, processorID uuid.UUI
 
 // GetLastProcessorForFlow retrieves the last processor(s) for a flow.
 // This function identifies processors that do not have any next processors.
-func (fm *DBFlowManager) GetLastProcessorForFlow(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *DBFlowManager) GetLastProcessorForFlow(flowID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	flow, err := fm.GetFlowByID(flowID)
 	if err != nil || flow == nil {
 		return nil, err
 	}
 
-	var lastProcessors []definitions.SimpleProcessor
+	var lastProcessors []*definitions.SimpleProcessor
 	for _, processor := range flow.Processors {
 		// Last processors are those without next processors
 		if len(processor.NextProcessorIDs) == 0 {
@@ -328,18 +328,18 @@ func (fm *DBFlowManager) convertFlowModelsToFlows(flowModels []flowModel) []defi
 	return flows
 }
 
-func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []processorModel) []definitions.SimpleProcessor {
-	simpleProcessors := make([]definitions.SimpleProcessor, len(processorModels))
+func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []processorModel) []*definitions.SimpleProcessor {
+	simpleProcessors := make([]*definitions.SimpleProcessor, len(processorModels))
 	for i, processor := range processorModels {
-		simpleProcessors[i] = *fm.convertProcessorModelToSimpleProcessor(&processor)
+		simpleProcessors[i] = fm.convertProcessorModelToSimpleProcessor(&processor)
 	}
 	return simpleProcessors
 }
 
-func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []triggerProcessorModel) []definitions.SimpleTriggerProcessor {
-	simpleTriggerProcessors := make([]definitions.SimpleTriggerProcessor, len(triggerProcessorModels))
+func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []triggerProcessorModel) []*definitions.SimpleTriggerProcessor {
+	simpleTriggerProcessors := make([]*definitions.SimpleTriggerProcessor, len(triggerProcessorModels))
 	for i, triggerProcessor := range triggerProcessorModels {
-		simpleTriggerProcessors[i] = *fm.convertTriggerProcessorModelToSimpleTriggerProcessor(&triggerProcessor)
+		simpleTriggerProcessors[i] = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(&triggerProcessor)
 	}
 	return simpleTriggerProcessors
 }

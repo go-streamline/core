@@ -32,7 +32,7 @@ func NewInMemoryFlowManager() definitions.FlowManager {
 }
 
 // GetFirstProcessorsForFlow retrieves processors that are not referenced as "next processors".
-func (fm *InMemoryFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *InMemoryFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
@@ -40,7 +40,7 @@ func (fm *InMemoryFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]de
 		return nil, ErrFlowNotFound
 	}
 
-	var firstProcessors []definitions.SimpleProcessor
+	var firstProcessors []*definitions.SimpleProcessor
 	// collect processors not listed in any NextProcessorIDs
 	mentionedAsNext := make(map[uuid.UUID]bool)
 	for _, processor := range fm.flowToProcessor[flowID] {
@@ -51,7 +51,7 @@ func (fm *InMemoryFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]de
 
 	for _, processor := range fm.flowToProcessor[flowID] {
 		if !mentionedAsNext[processor.ID] {
-			firstProcessors = append(firstProcessors, *processor)
+			firstProcessors = append(firstProcessors, processor)
 		}
 	}
 
@@ -59,7 +59,7 @@ func (fm *InMemoryFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]de
 }
 
 // GetFlowProcessors retrieves all processors for a given flow.
-func (fm *InMemoryFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *InMemoryFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
@@ -68,25 +68,25 @@ func (fm *InMemoryFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]definition
 		return nil, ErrFlowNotFound
 	}
 
-	var allProcessors []definitions.SimpleProcessor
+	var allProcessors []*definitions.SimpleProcessor
 	for _, processor := range processors {
-		allProcessors = append(allProcessors, *processor)
+		allProcessors = append(allProcessors, processor)
 	}
 
 	return allProcessors, nil
 }
 
 // GetProcessors retrieves processors by their unique identifiers.
-func (fm *InMemoryFlowManager) GetProcessors(processorIDs []uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *InMemoryFlowManager) GetProcessors(processorIDs []uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	var result []definitions.SimpleProcessor
+	var result []*definitions.SimpleProcessor
 	for _, id := range processorIDs {
 		found := false
 		for _, processors := range fm.flowToProcessor {
 			if processor, exists := processors[id]; exists {
-				result = append(result, *processor)
+				result = append(result, processor)
 				found = true
 				break
 			}
@@ -100,7 +100,7 @@ func (fm *InMemoryFlowManager) GetProcessors(processorIDs []uuid.UUID) ([]defini
 }
 
 // GetNextProcessors retrieves processors referenced in the NextProcessorIDs of the specified processor.
-func (fm *InMemoryFlowManager) GetNextProcessors(flowID uuid.UUID, processorID uuid.UUID) ([]definitions.SimpleProcessor, error) {
+func (fm *InMemoryFlowManager) GetNextProcessors(flowID uuid.UUID, processorID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
@@ -114,10 +114,10 @@ func (fm *InMemoryFlowManager) GetNextProcessors(flowID uuid.UUID, processorID u
 		return nil, ErrProcessorNotFound
 	}
 
-	var nextProcessors []definitions.SimpleProcessor
+	var nextProcessors []*definitions.SimpleProcessor
 	for _, nextID := range processor.NextProcessorIDs {
 		if nextProcessor, ok := processors[nextID]; ok {
-			nextProcessors = append(nextProcessors, *nextProcessor)
+			nextProcessors = append(nextProcessors, nextProcessor)
 		}
 	}
 	return nextProcessors, nil
@@ -265,13 +265,13 @@ func (fm *InMemoryFlowManager) SaveFlow(flow *definitions.Flow) error {
 		fm.flowToProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
 	}
 	for _, processor := range flow.Processors {
-		fm.flowToProcessor[flow.ID][processor.ID] = &processor
+		fm.flowToProcessor[flow.ID][processor.ID] = processor
 	}
 	if fm.flowToTriggerProcessor[flow.ID] == nil {
 		fm.flowToTriggerProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleTriggerProcessor)
 	}
 	for _, triggerProcessor := range flow.TriggerProcessors {
-		fm.flowToTriggerProcessor[flow.ID][triggerProcessor.ID] = &triggerProcessor
+		fm.flowToTriggerProcessor[flow.ID][triggerProcessor.ID] = triggerProcessor
 	}
 	fm.flowUpdates[flow.ID] = time.Now()
 	return nil
