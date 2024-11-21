@@ -63,7 +63,7 @@ func (fm *DBFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]*definitions.Sim
 		return nil, err
 	}
 
-	var processorModels []processorModel
+	var processorModels []*processorModel
 	query := fm.db.Where("flow_id = ?", flowID).Find(&processorModels)
 	if query.Error != nil {
 		if errors.Is(query.Error, gorm.ErrRecordNotFound) {
@@ -155,7 +155,7 @@ func (fm *DBFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]*defin
 }
 
 func (fm *DBFlowManager) GetProcessors(ids []uuid.UUID) ([]*definitions.SimpleProcessor, error) {
-	var models []processorModel
+	var models []*processorModel
 	err := fm.db.Find(&models, "id IN ?", ids).Error
 
 	if err != nil {
@@ -328,18 +328,18 @@ func (fm *DBFlowManager) convertFlowModelsToFlows(flowModels []flowModel) []defi
 	return flows
 }
 
-func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []processorModel) []*definitions.SimpleProcessor {
+func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []*processorModel) []*definitions.SimpleProcessor {
 	simpleProcessors := make([]*definitions.SimpleProcessor, len(processorModels))
 	for i, processor := range processorModels {
-		simpleProcessors[i] = fm.convertProcessorModelToSimpleProcessor(&processor)
+		simpleProcessors[i] = fm.convertProcessorModelToSimpleProcessor(processor)
 	}
 	return simpleProcessors
 }
 
-func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []triggerProcessorModel) []*definitions.SimpleTriggerProcessor {
+func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []*triggerProcessorModel) []*definitions.SimpleTriggerProcessor {
 	simpleTriggerProcessors := make([]*definitions.SimpleTriggerProcessor, len(triggerProcessorModels))
 	for i, triggerProcessor := range triggerProcessorModels {
-		simpleTriggerProcessors[i] = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(&triggerProcessor)
+		simpleTriggerProcessors[i] = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(triggerProcessor)
 	}
 	return simpleTriggerProcessors
 }
@@ -429,10 +429,10 @@ func (fm *DBFlowManager) convertFlowToFlowModel(flow *definitions.Flow) *flowMod
 		Name:        flow.Name,
 		Description: flow.Description,
 		Active:      flow.Active,
-		Processors:  make([]processorModel, len(flow.Processors)),
+		Processors:  make([]*processorModel, len(flow.Processors)),
 	}
 	for i, processor := range flow.Processors {
-		modelFlow.Processors[i] = *fm.convertSimpleProcessorToProcessorModel(&processor)
+		modelFlow.Processors[i] = fm.convertSimpleProcessorToProcessorModel(processor)
 	}
 	return modelFlow
 }
