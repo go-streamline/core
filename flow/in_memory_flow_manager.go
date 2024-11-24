@@ -140,7 +140,7 @@ func (fm *InMemoryFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]
 }
 
 // ListFlows lists flows with pagination and a time filter.
-func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (definitions.PaginatedData[*definitions.Flow], error) {
+func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (*definitions.PaginatedData[*definitions.Flow], error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
@@ -156,7 +156,7 @@ func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationReque
 	end := start + pagination.Limit()
 
 	if start > totalCount {
-		return definitions.PaginatedData[*definitions.Flow]{
+		return &definitions.PaginatedData[*definitions.Flow]{
 			Data:       []*definitions.Flow{},
 			TotalCount: totalCount,
 		}, nil
@@ -166,7 +166,7 @@ func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationReque
 		end = totalCount
 	}
 
-	return definitions.PaginatedData[*definitions.Flow]{
+	return &definitions.PaginatedData[*definitions.Flow]{
 		Data:       flows[start:end],
 		TotalCount: totalCount,
 	}, nil

@@ -80,18 +80,18 @@ func (fm *DBFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]*definitions.Sim
 }
 
 // ListFlows lists all flows with pagination and filters based on the last update time.
-func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (definitions.PaginatedData[*definitions.Flow], error) {
+func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest, since time.Time) (*definitions.PaginatedData[*definitions.Flow], error) {
 	var flowModels []*flowModel
 	var totalCount int64
 
 	query := fm.db.Model(&flowModel{}).Where("updated_at > ?", since).Count(&totalCount)
 	if query.Error != nil {
-		return definitions.PaginatedData[*definitions.Flow]{}, fmt.Errorf("%w: %v", ErrFailedToGetTotalCount, query.Error)
+		return nil, fmt.Errorf("%w: %v", ErrFailedToGetTotalCount, query.Error)
 	}
 	query = query.Offset(pagination.Offset()).Limit(pagination.Limit()).Find(&flowModels)
 
 	if query.Error != nil {
-		return definitions.PaginatedData[*definitions.Flow]{}, query.Error
+		return nil, query.Error
 	}
 
 	flows := make([]*definitions.Flow, len(flowModels))
@@ -104,10 +104,10 @@ func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest, si
 		}
 	}
 	if allErrors != nil {
-		return definitions.PaginatedData[*definitions.Flow]{}, allErrors
+		return nil, allErrors
 	}
 
-	return definitions.PaginatedData[*definitions.Flow]{
+	return &definitions.PaginatedData[*definitions.Flow]{
 		Data:       flows,
 		TotalCount: int(totalCount),
 	}, nil
@@ -438,16 +438,15 @@ func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(mo
 		return nil, fmt.Errorf("%w: %v", ErrFailedToConvertTriggerProcessors, err)
 	}
 	return &definitions.SimpleTriggerProcessor{
-		ID:           model.ID,
-		FlowID:       model.FlowID,
-		Name:         model.Name,
-		Type:         model.Type,
-		ScheduleType: definitions.ScheduleType(model.ScheduleType),
-		CronExpr:     model.CronExpr,
-		Config:       tpConfig,
-		LogLevel:     logLevel,
-		Enabled:      model.Enabled,
-		SingleNode:   model.SingleNode,
+		ID:         model.ID,
+		FlowID:     model.FlowID,
+		Name:       model.Name,
+		Type:       model.Type,
+		CronExpr:   model.CronExpr,
+		Config:     tpConfig,
+		LogLevel:   logLevel,
+		Enabled:    model.Enabled,
+		SingleNode: model.SingleNode,
 	}, nil
 }
 
@@ -490,7 +489,6 @@ func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(tr
 		FlowID:        triggerProcessor.FlowID,
 		Name:          triggerProcessor.Name,
 		Type:          triggerProcessor.Type,
-		ScheduleType:  int(triggerProcessor.ScheduleType),
 		CronExpr:      triggerProcessor.CronExpr,
 		Configuration: conf,
 		LogLevel:      triggerProcessor.LogLevel.String(),
