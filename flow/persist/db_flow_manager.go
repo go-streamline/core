@@ -387,7 +387,10 @@ func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []*
 			allErrors = errors.Join(allErrors, err)
 		}
 	}
-	return simpleProcessors, fmt.Errorf("%w: %v", ErrFailedToConvertProcessors, allErrors)
+	if allErrors != nil {
+		return nil, fmt.Errorf("%w: %v", ErrFailedToConvertProcessors, allErrors)
+	}
+	return simpleProcessors, err
 }
 
 func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []*triggerProcessorModel) ([]*definitions.SimpleTriggerProcessor, error) {
