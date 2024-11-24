@@ -2,6 +2,7 @@ package persist
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/ristretto"
@@ -10,6 +11,7 @@ import (
 	"github.com/go-streamline/interfaces/definitions"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"time"
 )
@@ -22,6 +24,8 @@ var (
 	ErrFailedToCreateProcessor          = fmt.Errorf("failed to create processor")
 	ErrFailedToUpdateReferenceProcessor = fmt.Errorf("failed to update reference processor")
 	ErrProcessorNotFound                = fmt.Errorf("processor not found")
+	ErrFailedToConvertProcessors        = fmt.Errorf("failed to convert processors")
+	ErrFailedToConvertTriggerProcessors = fmt.Errorf("failed to convert trigger processors")
 )
 
 type DBFlowManager struct {
@@ -72,7 +76,7 @@ func (fm *DBFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]*definitions.Sim
 		return nil, query.Error
 	}
 
-	return fm.convertProcessorsToSimpleProcessors(processorModels), nil
+	return fm.convertProcessorsToSimpleProcessors(processorModels)
 }
 
 // ListFlows lists all flows with pagination and filters based on the last update time.
@@ -91,8 +95,16 @@ func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest, si
 	}
 
 	flows := make([]*definitions.Flow, len(flowModels))
+	var allErrors error
+	var err error
 	for i, flow := range flowModels {
-		flows[i] = fm.convertFlowModelToFlow(flow)
+		flows[i], err = fm.convertFlowModelToFlow(flow)
+		if err != nil {
+			allErrors = errors.Join(allErrors, err)
+		}
+	}
+	if allErrors != nil {
+		return definitions.PaginatedData[*definitions.Flow]{}, allErrors
 	}
 
 	return definitions.PaginatedData[*definitions.Flow]{
@@ -120,7 +132,10 @@ func (fm *DBFlowManager) GetFlowByID(flowID uuid.UUID) (*definitions.Flow, error
 		return nil, err
 	}
 
-	result := fm.convertFlowModelToFlow(&flow)
+	result, err := fm.convertFlowModelToFlow(&flow)
+	if err != nil {
+		return nil, err
+	}
 	_ = fm.flowCache.Set(fm.ctx, flowID.String(), result)
 
 	return result, nil
@@ -148,10 +163,14 @@ func (fm *DBFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]*defin
 	}
 
 	triggerProcessors := make([]*definitions.SimpleTriggerProcessor, len(triggerProcessorModels))
+	var allErrors error
 	for i, model := range triggerProcessorModels {
-		triggerProcessors[i] = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(model)
+		triggerProcessors[i], err = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(model)
+		if err != nil {
+			allErrors = errors.Join(allErrors, err)
+		}
 	}
-	return triggerProcessors, nil
+	return triggerProcessors, allErrors
 }
 
 func (fm *DBFlowManager) GetProcessors(ids []uuid.UUID) ([]*definitions.SimpleProcessor, error) {
@@ -165,7 +184,7 @@ func (fm *DBFlowManager) GetProcessors(ids []uuid.UUID) ([]*definitions.SimplePr
 		return nil, err
 	}
 
-	return fm.convertProcessorsToSimpleProcessors(models), nil
+	return fm.convertProcessorsToSimpleProcessors(models)
 }
 
 // AddProcessorToFlowBefore adds a processor to the flow before a reference processor.
@@ -183,7 +202,10 @@ func (fm *DBFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, processor *d
 		// Set this processor's next to the reference processor
 		processor.NextProcessorIDs = []uuid.UUID{referenceProcessorID}
 
-		modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
+		modelProcessor, err := fm.convertSimpleProcessorToProcessorModel(processor)
+		if err != nil {
+			return err
+		}
 		modelProcessor.FlowID = flowID
 
 		err = tx.Create(modelProcessor).Error
@@ -191,7 +213,11 @@ func (fm *DBFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, processor *d
 			return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
 		}
 
-		err = tx.Save(fm.convertSimpleProcessorToProcessorModel(referenceProcessor)).Error
+		model, err := fm.convertSimpleProcessorToProcessorModel(referenceProcessor)
+		if err != nil {
+			return err
+		}
+		err = tx.Save(model).Error
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFailedToUpdateReferenceProcessor, err)
 		}
@@ -216,7 +242,10 @@ func (fm *DBFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, processor *de
 		// Set the reference processor's next to this processor
 		referenceProcessor.NextProcessorIDs = append(referenceProcessor.NextProcessorIDs, processor.ID)
 
-		modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
+		modelProcessor, err := fm.convertSimpleProcessorToProcessorModel(processor)
+		if err != nil {
+			return err
+		}
 		modelProcessor.FlowID = flowID
 
 		err = tx.Create(modelProcessor).Error
@@ -224,7 +253,11 @@ func (fm *DBFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, processor *de
 			return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
 		}
 
-		err = tx.Save(fm.convertSimpleProcessorToProcessorModel(referenceProcessor)).Error
+		model, err := fm.convertSimpleProcessorToProcessorModel(referenceProcessor)
+		if err != nil {
+			return err
+		}
+		err = tx.Save(model).Error
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFailedToUpdateReferenceProcessor, err)
 		}
@@ -237,13 +270,19 @@ func (fm *DBFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, processor *de
 
 // SaveFlow saves the flow and its processors to the database.
 func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
-	modelFlow := fm.convertFlowToFlowModel(flow)
+	modelFlow, err := fm.convertFlowToFlowModel(flow)
+	if err != nil {
+		return err
+	}
 	return fm.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&modelFlow).Error; err != nil {
 			return err
 		}
 		for _, processor := range flow.Processors {
-			modelProcessor := fm.convertSimpleProcessorToProcessorModel(processor)
+			modelProcessor, err := fm.convertSimpleProcessorToProcessorModel(processor)
+			if err != nil {
+				return err
+			}
 			modelProcessor.FlowID = modelFlow.ID
 			if err := tx.Save(modelProcessor).Error; err != nil {
 				return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
@@ -251,7 +290,10 @@ func (fm *DBFlowManager) SaveFlow(flow *definitions.Flow) error {
 		}
 
 		for _, triggerProcessor := range flow.TriggerProcessors {
-			modelTriggerProcessor := fm.convertSimpleTriggerProcessorToTriggerProcessorModel(triggerProcessor)
+			modelTriggerProcessor, err := fm.convertSimpleTriggerProcessorToTriggerProcessorModel(triggerProcessor)
+			if err != nil {
+				return err
+			}
 			modelTriggerProcessor.FlowID = modelFlow.ID
 			if err := tx.Save(modelTriggerProcessor).Error; err != nil {
 				return fmt.Errorf("%w: %v", ErrFailedToCreateProcessor, err)
@@ -320,53 +362,80 @@ func (fm *DBFlowManager) SetFlowActive(flowID uuid.UUID, active bool) error {
 
 // Convert functions
 
-func (fm *DBFlowManager) convertFlowModelsToFlows(flowModels []flowModel) []definitions.Flow {
+func (fm *DBFlowManager) convertFlowModelsToFlows(flowModels []flowModel) ([]definitions.Flow, error) {
 	flows := make([]definitions.Flow, len(flowModels))
+	var allErrors error
 	for i, flow := range flowModels {
-		flows[i] = *fm.convertFlowModelToFlow(&flow)
+		newFlow, err := fm.convertFlowModelToFlow(&flow)
+		if err != nil {
+			allErrors = errors.Join(allErrors)
+		}
+		if newFlow != nil {
+			flows[i] = *newFlow
+		}
 	}
-	return flows
+	return flows, allErrors
 }
 
-func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []*processorModel) []*definitions.SimpleProcessor {
+func (fm *DBFlowManager) convertProcessorsToSimpleProcessors(processorModels []*processorModel) ([]*definitions.SimpleProcessor, error) {
 	simpleProcessors := make([]*definitions.SimpleProcessor, len(processorModels))
+	var err error
+	var allErrors error
 	for i, processor := range processorModels {
-		simpleProcessors[i] = fm.convertProcessorModelToSimpleProcessor(processor)
+		simpleProcessors[i], err = fm.convertProcessorModelToSimpleProcessor(processor)
+		if err != nil {
+			allErrors = errors.Join(allErrors, err)
+		}
 	}
-	return simpleProcessors
+	return simpleProcessors, fmt.Errorf("%w: %v", ErrFailedToConvertProcessors, allErrors)
 }
 
-func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []*triggerProcessorModel) []*definitions.SimpleTriggerProcessor {
+func (fm *DBFlowManager) convertTriggerProcessorsToSimpleTriggerProcessors(triggerProcessorModels []*triggerProcessorModel) ([]*definitions.SimpleTriggerProcessor, error) {
 	simpleTriggerProcessors := make([]*definitions.SimpleTriggerProcessor, len(triggerProcessorModels))
+	var allErrors error
+	var err error
 	for i, triggerProcessor := range triggerProcessorModels {
-		simpleTriggerProcessors[i] = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(triggerProcessor)
+		simpleTriggerProcessors[i], err = fm.convertTriggerProcessorModelToSimpleTriggerProcessor(triggerProcessor)
+		if err != nil {
+			allErrors = errors.Join(allErrors, err)
+		}
 	}
-	return simpleTriggerProcessors
+	return simpleTriggerProcessors, allErrors
 }
 
-func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *processorModel) *definitions.SimpleProcessor {
+func (fm *DBFlowManager) convertProcessorModelToSimpleProcessor(processor *processorModel) (*definitions.SimpleProcessor, error) {
 	logLevel, err := logrus.ParseLevel(processor.LogLevel)
 	if err != nil {
 		logLevel = logrus.InfoLevel
+	}
+	pConfig := make(map[string]interface{})
+	err = json.Unmarshal(processor.Configuration, &pConfig)
+	if err != nil {
+		return nil, err
 	}
 	return &definitions.SimpleProcessor{
 		ID:               processor.ID,
 		FlowID:           processor.FlowID,
 		Name:             processor.Name,
 		Type:             processor.Type,
-		Config:           processor.Configuration,
+		Config:           pConfig,
 		MaxRetries:       processor.MaxRetries,
 		BackoffSeconds:   processor.BackoffSeconds,
 		LogLevel:         logLevel,
 		Enabled:          processor.Enabled,
 		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors
-	}
+	}, nil
 }
 
-func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(model *triggerProcessorModel) *definitions.SimpleTriggerProcessor {
+func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(model *triggerProcessorModel) (*definitions.SimpleTriggerProcessor, error) {
 	logLevel, err := logrus.ParseLevel(model.LogLevel)
 	if err != nil {
 		logLevel = logrus.InfoLevel
+	}
+	tpConfig := make(map[string]interface{})
+	err = json.Unmarshal(model.Configuration, &tpConfig)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrFailedToConvertTriggerProcessors, err)
 	}
 	return &definitions.SimpleTriggerProcessor{
 		ID:           model.ID,
@@ -375,29 +444,47 @@ func (fm *DBFlowManager) convertTriggerProcessorModelToSimpleTriggerProcessor(mo
 		Type:         model.Type,
 		ScheduleType: definitions.ScheduleType(model.ScheduleType),
 		CronExpr:     model.CronExpr,
-		Config:       model.Configuration,
+		Config:       tpConfig,
 		LogLevel:     logLevel,
 		Enabled:      model.Enabled,
 		SingleNode:   model.SingleNode,
-	}
+	}, nil
 }
 
-func (fm *DBFlowManager) convertSimpleProcessorToProcessorModel(processor *definitions.SimpleProcessor) *processorModel {
+func (fm *DBFlowManager) convertSimpleProcessorToProcessorModel(processor *definitions.SimpleProcessor) (*processorModel, error) {
+	conf := datatypes.JSON{}
+	bytes, err := json.Marshal(processor.Config)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrFailedToConvertProcessors, err)
+	}
+	err = conf.Scan(bytes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrFailedToConvertProcessors, err)
+	}
 	return &processorModel{
 		ID:               processor.ID,
 		FlowID:           processor.FlowID,
 		Name:             processor.Name,
 		Type:             processor.Type,
-		Configuration:    processor.Config,
+		Configuration:    conf,
 		MaxRetries:       processor.MaxRetries,
 		BackoffSeconds:   processor.BackoffSeconds,
 		LogLevel:         processor.LogLevel.String(),
 		Enabled:          processor.Enabled,
 		NextProcessorIDs: processor.NextProcessorIDs, // Use the new field for next processors
-	}
+	}, nil
 }
 
-func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(triggerProcessor *definitions.SimpleTriggerProcessor) *triggerProcessorModel {
+func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(triggerProcessor *definitions.SimpleTriggerProcessor) (*triggerProcessorModel, error) {
+	conf := datatypes.JSON{}
+	bytes, err := json.Marshal(triggerProcessor.Config)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrFailedToConvertTriggerProcessors, err)
+	}
+	err = conf.Scan(bytes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrFailedToConvertTriggerProcessors, err)
+	}
 	return &triggerProcessorModel{
 		ID:            triggerProcessor.ID,
 		FlowID:        triggerProcessor.FlowID,
@@ -405,25 +492,33 @@ func (fm *DBFlowManager) convertSimpleTriggerProcessorToTriggerProcessorModel(tr
 		Type:          triggerProcessor.Type,
 		ScheduleType:  int(triggerProcessor.ScheduleType),
 		CronExpr:      triggerProcessor.CronExpr,
-		Configuration: triggerProcessor.Config,
+		Configuration: conf,
 		LogLevel:      triggerProcessor.LogLevel.String(),
 		SingleNode:    triggerProcessor.SingleNode,
 		Enabled:       triggerProcessor.Enabled,
-	}
+	}, nil
 }
 
-func (fm *DBFlowManager) convertFlowModelToFlow(flow *flowModel) *definitions.Flow {
+func (fm *DBFlowManager) convertFlowModelToFlow(flow *flowModel) (*definitions.Flow, error) {
+	processors, err := fm.convertProcessorsToSimpleProcessors(flow.Processors)
+	if err != nil {
+		return nil, err
+	}
+	triggerProcessors, err := fm.convertTriggerProcessorsToSimpleTriggerProcessors(flow.TriggerProcessors)
+	if err != nil {
+		return nil, err
+	}
 	return &definitions.Flow{
 		ID:                flow.ID,
 		Name:              flow.Name,
 		Description:       flow.Description,
-		Processors:        fm.convertProcessorsToSimpleProcessors(flow.Processors),
-		TriggerProcessors: fm.convertTriggerProcessorsToSimpleTriggerProcessors(flow.TriggerProcessors),
+		Processors:        processors,
+		TriggerProcessors: triggerProcessors,
 		Active:            flow.Active,
-	}
+	}, nil
 }
 
-func (fm *DBFlowManager) convertFlowToFlowModel(flow *definitions.Flow) *flowModel {
+func (fm *DBFlowManager) convertFlowToFlowModel(flow *definitions.Flow) (*flowModel, error) {
 	modelFlow := &flowModel{
 		ID:          flow.ID,
 		Name:        flow.Name,
@@ -431,8 +526,13 @@ func (fm *DBFlowManager) convertFlowToFlowModel(flow *definitions.Flow) *flowMod
 		Active:      flow.Active,
 		Processors:  make([]*processorModel, len(flow.Processors)),
 	}
+	var err error
+	var allErrors error
 	for i, processor := range flow.Processors {
-		modelFlow.Processors[i] = fm.convertSimpleProcessorToProcessorModel(processor)
+		modelFlow.Processors[i], err = fm.convertSimpleProcessorToProcessorModel(processor)
+		if err != nil {
+			allErrors = errors.Join(allErrors, err)
+		}
 	}
-	return modelFlow
+	return modelFlow, allErrors
 }

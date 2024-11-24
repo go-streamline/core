@@ -2,6 +2,7 @@ package persist
 
 import (
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -13,7 +14,7 @@ type processorModel struct {
 	MaxRetries           int            `gorm:"column:max_retries;default:3"`
 	BackoffSeconds       int            `gorm:"column:backoff_seconds;default:1"`
 	LogLevel             string         `gorm:"column:log_level;not null;default:'info'"`
-	Configuration        map[string]any `gorm:"column:configuration;type:jsonb;not null"`
+	Configuration        datatypes.JSON `gorm:"column:configuration;not null"`
 	NextProcessorIDs     []uuid.UUID    `gorm:"column:next_processor_ids;type:uuid[];index:idx_flow_next_processor"`
 	PreviousProcessorIDs []uuid.UUID    `gorm:"column:previous_processor_ids;type:uuid[];index:idx_flow_previous_processor"`
 	Enabled              bool           `gorm:"column:enabled;not null;default:true"`
