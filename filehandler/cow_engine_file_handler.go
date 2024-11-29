@@ -3,6 +3,7 @@ package filehandler
 import (
 	"fmt"
 	"github.com/go-streamline/interfaces/definitions"
+	"github.com/go-streamline/interfaces/utils"
 	"github.com/google/uuid"
 	"io"
 	"os"
@@ -42,6 +43,10 @@ func (c *CopyOnWriteEngineFileHandler) Write() (io.Writer, error) {
 	}
 	if c.writer != nil {
 		return c.writer, nil
+	}
+	err := utils.CreateDirsIfNotExist(path.Dir(c.output))
+	if err != nil {
+		return nil, err
 	}
 	file, err := os.Create(c.output)
 	if err != nil {
