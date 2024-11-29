@@ -84,9 +84,14 @@ func (c *CopyOnWriteEngineFileHandler) GenerateNewFileHandler() (definitions.Eng
 
 	c.Close()
 
+	newOutputFilePathInput := input
+	if newOutputFilePathInput == "" {
+		newOutputFilePathInput = c.output
+	}
+
 	return &CopyOnWriteEngineFileHandler{
 		input:  input,
-		output: generateNewOutputFilePath(input),
+		output: generateNewOutputFilePath(newOutputFilePathInput),
 	}, nil
 }
 
