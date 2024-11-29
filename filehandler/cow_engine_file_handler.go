@@ -1,7 +1,6 @@
 package filehandler
 
 import (
-	"fmt"
 	"github.com/go-streamline/interfaces/definitions"
 	"github.com/go-streamline/interfaces/utils"
 	"github.com/google/uuid"
@@ -12,8 +11,6 @@ import (
 
 var NewEngineFileHandler = NewCopyOnWriteEngineFileHandler
 var NewWriteOnlyEngineFileHandler = NewWriteOnlyCOWFileHandler
-var ErrInputFileNotInitialized = fmt.Errorf("input file not initialized")
-var ErrOutputFileNotInitialized = fmt.Errorf("output file not initialized")
 
 type CopyOnWriteEngineFileHandler struct {
 	input  string
@@ -24,7 +21,7 @@ type CopyOnWriteEngineFileHandler struct {
 
 func (c *CopyOnWriteEngineFileHandler) Read() (io.Reader, error) {
 	if c.input == "" {
-		return nil, ErrInputFileNotInitialized
+		return nil, definitions.ErrInputFileNotInitialized
 	}
 	if c.reader != nil {
 		return c.reader, nil
@@ -39,7 +36,7 @@ func (c *CopyOnWriteEngineFileHandler) Read() (io.Reader, error) {
 
 func (c *CopyOnWriteEngineFileHandler) Write() (io.Writer, error) {
 	if c.output == "" {
-		return nil, ErrOutputFileNotInitialized
+		return nil, definitions.ErrOutputFileNotInitialized
 	}
 	if c.writer != nil {
 		return c.writer, nil
