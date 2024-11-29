@@ -84,7 +84,12 @@ func (fm *DBFlowManager) ListFlows(pagination *definitions.PaginationRequest, si
 	var flowModels []*flowModel
 	var totalCount int64
 
-	query := fm.db.Model(&flowModel{}).Where("updated_at > ?", since).Count(&totalCount)
+	query := fm.db.
+		Preload("Processors").
+		Preload("TriggerProcessors").
+		Model(&flowModel{}).
+		Where("updated_at > ?", since).
+		Count(&totalCount)
 	if query.Error != nil {
 		return nil, fmt.Errorf("%w: %v", ErrFailedToGetTotalCount, query.Error)
 	}
