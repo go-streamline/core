@@ -38,7 +38,14 @@ func (m *MultipleStateTypesManager) GetState(stateType definitions.StateType) (m
 	if !ok {
 		return nil, ErrUnsupportedStateType
 	}
-	return stateManager.GetState(stateType)
+	stateMap, err := stateManager.GetState(stateType)
+	if err != nil {
+		return nil, err
+	}
+	if stateMap == nil {
+		return map[string]any{}, nil
+	}
+	return stateMap, nil
 }
 
 func (m *MultipleStateTypesManager) SetState(stateType definitions.StateType, state map[string]any) error {
