@@ -31,27 +31,28 @@ func NewInMemoryFlowManager() definitions.FlowManager {
 	}
 }
 
-// GetFirstProcessorsForFlow retrieves processors that are not referenced as "next processors".
+// GetFirstProcessorsForFlow retrieves processors that are not referenced as NextProcessors by any other processor.
 func (fm *InMemoryFlowManager) GetFirstProcessorsForFlow(flowID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	if _, exists := fm.flows[flowID]; !exists {
+	flow, exists := fm.flows[flowID]
+	if !exists {
 		return nil, ErrFlowNotFound
 	}
 
-	var firstProcessors []*definitions.SimpleProcessor
-	// collect processors not listed in any NextProcessorIDs
-	mentionedAsNext := make(map[uuid.UUID]bool)
-	for _, processor := range fm.flowToProcessor[flowID] {
-		for _, nextID := range processor.NextProcessorIDs {
-			mentionedAsNext[nextID] = true
+	// Build a set of processors that are referenced as NextProcessors
+	referenced := make(map[uuid.UUID]bool)
+	for _, p := range flow.Processors {
+		for _, np := range p.NextProcessors {
+			referenced[np.ID] = true
 		}
 	}
 
-	for _, processor := range fm.flowToProcessor[flowID] {
-		if !mentionedAsNext[processor.ID] {
-			firstProcessors = append(firstProcessors, processor)
+	var firstProcessors []*definitions.SimpleProcessor
+	for _, p := range flow.Processors {
+		if !referenced[p.ID] {
+			firstProcessors = append(firstProcessors, p)
 		}
 	}
 
@@ -63,20 +64,16 @@ func (fm *InMemoryFlowManager) GetFlowProcessors(flowID uuid.UUID) ([]*definitio
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	processors, exists := fm.flowToProcessor[flowID]
+	flow, exists := fm.flows[flowID]
 	if !exists {
 		return nil, ErrFlowNotFound
 	}
 
-	var allProcessors []*definitions.SimpleProcessor
-	for _, processor := range processors {
-		allProcessors = append(allProcessors, processor)
-	}
-
-	return allProcessors, nil
+	return flow.Processors, nil
 }
 
 // GetProcessors retrieves processors by their unique identifiers.
+// Since we have multiple flows, we scan them all.
 func (fm *InMemoryFlowManager) GetProcessors(processorIDs []uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
@@ -99,7 +96,7 @@ func (fm *InMemoryFlowManager) GetProcessors(processorIDs []uuid.UUID) ([]*defin
 	return result, nil
 }
 
-// GetNextProcessors retrieves processors referenced in the NextProcessorIDs of the specified processor.
+// GetNextProcessors retrieves the NextProcessors of the specified processor.
 func (fm *InMemoryFlowManager) GetNextProcessors(flowID uuid.UUID, processorID uuid.UUID) ([]*definitions.SimpleProcessor, error) {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
@@ -114,13 +111,7 @@ func (fm *InMemoryFlowManager) GetNextProcessors(flowID uuid.UUID, processorID u
 		return nil, ErrProcessorNotFound
 	}
 
-	var nextProcessors []*definitions.SimpleProcessor
-	for _, nextID := range processor.NextProcessorIDs {
-		if nextProcessor, ok := processors[nextID]; ok {
-			nextProcessors = append(nextProcessors, nextProcessor)
-		}
-	}
-	return nextProcessors, nil
+	return processor.NextProcessors, nil
 }
 
 // GetTriggerProcessorsForFlow retrieves the trigger processors for the specified flow.
@@ -128,15 +119,12 @@ func (fm *InMemoryFlowManager) GetTriggerProcessorsForFlow(flowID uuid.UUID) ([]
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	if _, exists := fm.flows[flowID]; !exists {
+	flow, exists := fm.flows[flowID]
+	if !exists {
 		return nil, ErrFlowNotFound
 	}
 
-	triggerProcessors := make([]*definitions.SimpleTriggerProcessor, 0)
-	for _, triggerProcessor := range fm.flowToTriggerProcessor[flowID] {
-		triggerProcessors = append(triggerProcessors, triggerProcessor)
-	}
-	return triggerProcessors, nil
+	return flow.TriggerProcessors, nil
 }
 
 // ListFlows lists flows with pagination and a time filter.
@@ -144,9 +132,10 @@ func (fm *InMemoryFlowManager) ListFlows(pagination *definitions.PaginationReque
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	flows := make([]*definitions.Flow, 0)
+	var flows []*definitions.Flow
 	for _, flow := range fm.flows {
-		if update, exists := fm.flowUpdates[flow.ID]; exists && update.After(since) {
+		update, exists := fm.flowUpdates[flow.ID]
+		if exists && update.After(since) {
 			flows = append(flows, flow)
 		}
 	}
@@ -201,61 +190,78 @@ func (fm *InMemoryFlowManager) GetProcessorByID(flowID uuid.UUID, processorID uu
 	return processor, nil
 }
 
-// AddProcessorToFlowBefore adds a processor before the reference processor by adjusting NextProcessorIDs.
-func (fm *InMemoryFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, processor *definitions.SimpleProcessor, referenceProcessorID uuid.UUID) error {
+// AddProcessorToFlowBefore inserts a processor before the reference processor.
+// This means the new processor should now appear in place of the reference processor wherever it was referenced.
+// Also, the new processor points to the reference processor in its NextProcessors.
+func (fm *InMemoryFlowManager) AddProcessorToFlowBefore(flowID uuid.UUID, newProcessor *definitions.SimpleProcessor, referenceProcessorID uuid.UUID) error {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
 
-	// validate reference processor exists
-	_, err := fm.GetProcessorByID(flowID, referenceProcessorID)
-	if err != nil {
-		return err
+	flow, exists := fm.flows[flowID]
+	if !exists {
+		return ErrFlowNotFound
 	}
-
-	// set new processor's NextProcessorIDs to point to the referenceProcessor
-	processor.NextProcessorIDs = []uuid.UUID{referenceProcessorID}
-
-	// find processors that point to the referenceProcessor and redirect them to the new processor
-	for _, proc := range fm.flowToProcessor[flowID] {
-		for i, nextID := range proc.NextProcessorIDs {
-			if nextID == referenceProcessorID {
-				proc.NextProcessorIDs[i] = processor.ID
-			}
-		}
-	}
-
-	// add the new processor to the flow
-	if fm.flowToProcessor[flowID] == nil {
-		fm.flowToProcessor[flowID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
-	}
-	fm.flowToProcessor[flowID][processor.ID] = processor
-	fm.flowUpdates[flowID] = time.Now()
-	return nil
-}
-
-// AddProcessorToFlowAfter adds a processor after the reference processor.
-func (fm *InMemoryFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, processor *definitions.SimpleProcessor, referenceProcessorID uuid.UUID) error {
-	fm.mu.Lock()
-	defer fm.mu.Unlock()
 
 	referenceProcessor, err := fm.GetProcessorByID(flowID, referenceProcessorID)
 	if err != nil {
 		return err
 	}
 
-	// Add the new processor after the reference processor by updating NextProcessorIDs
-	referenceProcessor.NextProcessorIDs = append(referenceProcessor.NextProcessorIDs, processor.ID)
-
-	// Add the processor to the flow
-	if fm.flowToProcessor[flowID] == nil {
-		fm.flowToProcessor[flowID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
+	// Insert newProcessor so that wherever referenceProcessor was referenced, it gets replaced by newProcessor
+	for _, p := range flow.Processors {
+		for i, np := range p.NextProcessors {
+			if np.ID == referenceProcessor.ID {
+				p.NextProcessors[i] = newProcessor
+			}
+		}
 	}
-	fm.flowToProcessor[flowID][processor.ID] = processor
+
+	// Now newProcessor should point to the referenceProcessor
+	newProcessor.NextProcessors = []*definitions.SimpleProcessor{referenceProcessor}
+
+	// Add newProcessor to the flow
+	flow.Processors = append(flow.Processors, newProcessor)
+	if fm.flowToProcessor[flow.ID] == nil {
+		fm.flowToProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
+	}
+	fm.flowToProcessor[flow.ID][newProcessor.ID] = newProcessor
+
+	fm.flowUpdates[flowID] = time.Now()
+	return nil
+}
+
+// AddProcessorToFlowAfter adds a processor after the reference processor by appending it to the reference processor's NextProcessors.
+func (fm *InMemoryFlowManager) AddProcessorToFlowAfter(flowID uuid.UUID, newProcessor *definitions.SimpleProcessor, referenceProcessorID uuid.UUID) error {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	flow, exists := fm.flows[flowID]
+	if !exists {
+		return ErrFlowNotFound
+	}
+
+	referenceProcessor, err := fm.GetProcessorByID(flowID, referenceProcessorID)
+	if err != nil {
+		return err
+	}
+
+	// Add newProcessor to the referenceProcessor's NextProcessors
+	referenceProcessor.NextProcessors = append(referenceProcessor.NextProcessors, newProcessor)
+
+	// Also add the newProcessor to the flow
+	flow.Processors = append(flow.Processors, newProcessor)
+	if fm.flowToProcessor[flow.ID] == nil {
+		fm.flowToProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
+	}
+	fm.flowToProcessor[flow.ID][newProcessor.ID] = newProcessor
+
 	fm.flowUpdates[flowID] = time.Now()
 	return nil
 }
 
 // SaveFlow saves the flow and its processors.
+// Because the flow already has Processors and TriggerProcessors with proper references, we just store them.
+// We assume that `flow.Processors` includes all processors and `flow.FirstProcessors` is derived, not stored explicitly.
 func (fm *InMemoryFlowManager) SaveFlow(flow *definitions.Flow) error {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
@@ -264,9 +270,11 @@ func (fm *InMemoryFlowManager) SaveFlow(flow *definitions.Flow) error {
 	if fm.flowToProcessor[flow.ID] == nil {
 		fm.flowToProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleProcessor)
 	}
+	// Store all processors in a map by ID for quick lookup
 	for _, processor := range flow.Processors {
 		fm.flowToProcessor[flow.ID][processor.ID] = processor
 	}
+
 	if fm.flowToTriggerProcessor[flow.ID] == nil {
 		fm.flowToTriggerProcessor[flow.ID] = make(map[uuid.UUID]*definitions.SimpleTriggerProcessor)
 	}
@@ -274,6 +282,7 @@ func (fm *InMemoryFlowManager) SaveFlow(flow *definitions.Flow) error {
 		fm.flowToTriggerProcessor[flow.ID][triggerProcessor.ID] = triggerProcessor
 	}
 	fm.flowUpdates[flow.ID] = time.Now()
+
 	return nil
 }
 
