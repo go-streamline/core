@@ -32,7 +32,7 @@ func (hook *LogrusHook) Fire(entry *logrus.Entry) error {
 	return nil
 }
 
-func GetLogFactory(
+func New(
 	filename string,
 	maxSizeMB int,
 	maxAgeDays int,
