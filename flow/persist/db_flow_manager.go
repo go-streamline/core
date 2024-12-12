@@ -32,13 +32,14 @@ type DBFlowManager struct {
 	db        *gorm.DB
 	flowCache *cache.Cache[*definitions.Flow]
 	ctx       context.Context
+	logger    *logrus.Logger
 }
 
 // flowModel, processorModel, triggerProcessorModel are assumed
 // to be defined similarly to how they are referenced in the code.
 
 // NewDBFlowManager creates a new instance of DBFlowManager with an in-memory cache for flows.
-func NewDBFlowManager(db *gorm.DB) (definitions.FlowManager, error) {
+func NewDBFlowManager(db *gorm.DB, logFactory definitions.LoggerFactory) (definitions.FlowManager, error) {
 	err := db.AutoMigrate(&flowModel{}, &processorModel{}, &triggerProcessorModel{})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrCouldNotRunMigrations, err)
@@ -61,6 +62,7 @@ func NewDBFlowManager(db *gorm.DB) (definitions.FlowManager, error) {
 		db:        db,
 		flowCache: flowCache,
 		ctx:       context.Background(),
+		logger:    logFactory.GetLogger("db_flow_manager"),
 	}, nil
 }
 
@@ -141,7 +143,7 @@ func (fm *DBFlowManager) GetFlowByID(flowID uuid.UUID) (*definitions.Flow, error
 	if err == nil {
 		// If there's no error, cachedFlow might still be nil if not found in cache.
 	} else {
-		logrus.WithError(err).Warn("error getting flow from cache")
+		fm.logger.WithError(err).Warn("error getting flow from cache")
 	}
 	if cachedFlow != nil {
 		return cachedFlow, nil

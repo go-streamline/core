@@ -15,12 +15,12 @@ type branchTracker struct {
 	log            *logrus.Logger
 }
 
-func NewBranchTracker(log *logrus.Logger) definitions.BranchTracker {
+func NewBranchTracker(logFactory definitions.LoggerFactory) definitions.BranchTracker {
 	return &branchTracker{
 		pendingTasks:   make(map[uuid.UUID]map[uuid.UUID]bool),
 		completedTasks: make(map[uuid.UUID][]uuid.UUID),
 		dependencies:   make(map[uuid.UUID][]uuid.UUID),
-		log:            log,
+		log:            logFactory.GetLogger("branch_tracker"),
 	}
 }
 
