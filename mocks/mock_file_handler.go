@@ -11,6 +11,10 @@ type MockFileHandler struct {
 	definitions.EngineFileHandler
 }
 
+func getMockFileHandler() definitions.EngineFileHandler {
+	return &MockFileHandler{}
+}
+
 func (m *MockFileHandler) GetInputFile() string {
 	args := m.Called()
 	return args.String(0)

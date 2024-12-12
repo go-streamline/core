@@ -14,6 +14,10 @@ type MockProcessor struct {
 	definitions.TriggerProcessor
 }
 
+func getMockProcessor() definitions.Processor {
+	return &MockProcessor{}
+}
+
 func (m *MockProcessor) Execute(info *definitions.EngineFlowObject,
 	fileHandler definitions.ProcessorFileHandler, log *logrus.Logger) (*definitions.EngineFlowObject, error) {
 	args := m.Called(info, fileHandler, log)

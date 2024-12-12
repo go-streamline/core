@@ -1,12 +1,17 @@
 package mocks
 
 import (
+	"github.com/go-streamline/interfaces/definitions"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 )
 
 type MockBranchTracker struct {
 	mock.Mock
+}
+
+func getMockBranchTracker() definitions.BranchTracker {
+	return &MockBranchTracker{}
 }
 
 func (m *MockBranchTracker) GetBranches() []string {

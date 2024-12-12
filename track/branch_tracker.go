@@ -1,9 +1,9 @@
 package track
 
 import (
-	"fmt"
 	"github.com/go-streamline/interfaces/definitions"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 	"sync"
 )
 
@@ -12,13 +12,15 @@ type branchTracker struct {
 	pendingTasks   map[uuid.UUID]map[uuid.UUID]bool // sessionID -> processorID -> pending (true if still pending)
 	completedTasks map[uuid.UUID][]uuid.UUID        // sessionID -> list of completed processor IDs
 	dependencies   map[uuid.UUID][]uuid.UUID        // processorID -> list of dependent processorIDs
+	log            *logrus.Logger
 }
 
-func NewBranchTracker() definitions.BranchTracker {
+func NewBranchTracker(log *logrus.Logger) definitions.BranchTracker {
 	return &branchTracker{
 		pendingTasks:   make(map[uuid.UUID]map[uuid.UUID]bool),
 		completedTasks: make(map[uuid.UUID][]uuid.UUID),
 		dependencies:   make(map[uuid.UUID][]uuid.UUID),
+		log:            log,
 	}
 }
 
@@ -33,7 +35,7 @@ func (b *branchTracker) AddProcessor(sessionID uuid.UUID, processorID uuid.UUID,
 	b.pendingTasks[sessionID][processorID] = true
 
 	// Log this for debugging
-	fmt.Printf("Processor %s added to session %s. Pending tasks: %v\n", processorID, sessionID, b.pendingTasks[sessionID])
+	b.log.Infof("Processor %s added to session %s. Pending tasks: %v\n", processorID, sessionID, b.pendingTasks[sessionID])
 
 	// Add the dependencies
 	b.dependencies[processorID] = nextProcessorIDs
@@ -48,7 +50,7 @@ func (b *branchTracker) MarkComplete(sessionID uuid.UUID, processorID uuid.UUID)
 		delete(b.pendingTasks[sessionID], processorID)
 
 		// Log the completed processor
-		fmt.Printf("Processor %s completed in session %s. Pending tasks: %v\n", processorID, sessionID, b.pendingTasks[sessionID])
+		b.log.Infof("Processor %s completed in session %s. Pending tasks: %v\n", processorID, sessionID, b.pendingTasks[sessionID])
 
 		// Store the completed processor ID
 		b.completedTasks[sessionID] = append(b.completedTasks[sessionID], processorID)
@@ -57,7 +59,7 @@ func (b *branchTracker) MarkComplete(sessionID uuid.UUID, processorID uuid.UUID)
 		for _, nextID := range b.dependencies[processorID] {
 			// Add the next processor to pending tasks
 			b.pendingTasks[sessionID][nextID] = true
-			fmt.Printf("Next processor %s added after %s completed\n", nextID, processorID)
+			b.log.Infof("Next processor %s added after %s completed\n", nextID, processorID)
 		}
 
 		// If no more pending processors, the session is complete

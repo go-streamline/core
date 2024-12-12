@@ -9,6 +9,10 @@ type MockWriteAheadLogger struct {
 	mock.Mock
 }
 
+func getMockWriteAheadLogger() definitions.WriteAheadLogger {
+	return &MockWriteAheadLogger{}
+}
+
 func (m *MockWriteAheadLogger) WriteEntry(entry definitions.LogEntry) {
 	m.Called(entry)
 }
