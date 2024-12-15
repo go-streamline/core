@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cespare/xxhash/v2"
 	"github.com/google/uuid"
 	"path"
 	"slices"
@@ -53,7 +54,7 @@ func NewCoordinator(
 		conn:           conn,
 		tpLeaderPath:   tpLeaderPath,
 		tpLeaders:      make(map[uuid.UUID]string),
-		log:            logFactory.GetLogger("coordinator-" + tpLeaderPath),
+		log:            logFactory.GetLogger(fmt.Sprintf("coordinator-%d", xxhash.Sum64String(tpLeaderPath))),
 		ctx:            ctx,
 		cancel:         cancel,
 		nodes:          []string{},
