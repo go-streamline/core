@@ -3,7 +3,6 @@ package wal
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"github.com/cespare/xxhash/v2"
 	"github.com/go-streamline/core/config"
 	"github.com/go-streamline/interfaces/definitions"
@@ -12,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"os"
+	"strconv"
 )
 
 type DefaultWriteAheadLogger struct {
@@ -47,7 +47,7 @@ func NewWriteAheadLogger(
 		logger:   walLogger,
 		filePath: walFilePath,
 		enabled:  conf.Enabled,
-		log:      logFactory.GetLogger(fmt.Sprintf("wal-%x", xxhash.Sum64String(walFilePath))),
+		log:      logFactory.GetLogger("wal", strconv.FormatUint(xxhash.Sum64String(walFilePath), 10)),
 	}, nil
 }
 

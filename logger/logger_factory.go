@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"github.com/go-streamline/interfaces/definitions"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
@@ -15,11 +16,14 @@ type DefaultLoggerFactory struct {
 	MaxBackups   int
 	Compress     bool
 	LogToConsole bool
+	Level        logrus.Level
+	CustomLevels map[string]logrus.Level
 }
 
 type LogrusHook struct {
 	Hostname string
 	Context  string
+	Type     string
 }
 
 func (hook *LogrusHook) Levels() []logrus.Level {
@@ -29,6 +33,7 @@ func (hook *LogrusHook) Levels() []logrus.Level {
 func (hook *LogrusHook) Fire(entry *logrus.Entry) error {
 	entry.Data["host"] = hook.Hostname
 	entry.Data["context"] = hook.Context
+	entry.Data["type"] = hook.Type
 	return nil
 }
 
@@ -39,7 +44,9 @@ func New(
 	maxBackups int,
 	compress bool,
 	logToConsole bool,
-) (*DefaultLoggerFactory, error) {
+	level logrus.Level,
+	customLevels map[string]logrus.Level,
+) (definitions.LoggerFactory, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return nil, err
@@ -53,16 +60,24 @@ func New(
 		Compress:     compress,
 		LogToConsole: logToConsole,
 		hostname:     hostname,
+		Level:        level,
+		CustomLevels: customLevels,
 	}, nil
 }
 
-func (d *DefaultLoggerFactory) GetLogger(name string) *logrus.Logger {
+func (d *DefaultLoggerFactory) GetLogger(loggerType string, name string) *logrus.Logger {
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{})
 	logger.AddHook(&LogrusHook{
 		Hostname: d.hostname,
 		Context:  name,
+		Type:     loggerType,
 	})
+	logger.SetLevel(d.Level)
+	if level, exists := d.CustomLevels[loggerType]; exists {
+		logger.SetLevel(level)
+	}
+
 	if d.Filename != "" {
 		out := &lumberjack.Logger{
 			Filename:   d.Filename,

@@ -62,7 +62,7 @@ func NewDBFlowManager(db *gorm.DB, logFactory definitions.LoggerFactory) (defini
 		db:        db,
 		flowCache: flowCache,
 		ctx:       context.Background(),
-		logger:    logFactory.GetLogger("db_flow_manager-" + db.Name()),
+		logger:    logFactory.GetLogger("db_flow_manager", db.Name()),
 	}, nil
 }
 

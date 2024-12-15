@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"path"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -54,7 +55,7 @@ func NewCoordinator(
 		conn:           conn,
 		tpLeaderPath:   tpLeaderPath,
 		tpLeaders:      make(map[uuid.UUID]string),
-		log:            logFactory.GetLogger(fmt.Sprintf("coordinator-%d", xxhash.Sum64String(tpLeaderPath))),
+		log:            logFactory.GetLogger("coordinator", strconv.FormatUint(xxhash.Sum64String(tpLeaderPath), 10)),
 		ctx:            ctx,
 		cancel:         cancel,
 		nodes:          []string{},

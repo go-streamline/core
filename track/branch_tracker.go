@@ -20,7 +20,7 @@ func NewBranchTracker(logFactory definitions.LoggerFactory) definitions.BranchTr
 		pendingTasks:   make(map[uuid.UUID]map[uuid.UUID]bool),
 		completedTasks: make(map[uuid.UUID][]uuid.UUID),
 		dependencies:   make(map[uuid.UUID][]uuid.UUID),
-		log:            logFactory.GetLogger("branch_tracker-" + uuid.New().String()),
+		log:            logFactory.GetLogger("branch_tracker", uuid.New().String()),
 	}
 }
 

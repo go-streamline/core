@@ -3,9 +3,9 @@ package zookeeper
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/cespare/xxhash/v2"
 	"github.com/go-streamline/interfaces/definitions"
+	"strconv"
 	"sync"
 	"time"
 
@@ -56,7 +56,7 @@ func NewZookeeperLeaderSelector(
 	return &leaderSelector{
 		conn:         conn,
 		znodePath:    znodePath,
-		log:          logFactory.GetLogger(fmt.Sprintf("leader-selector-%d", xxhash.Sum64String(znodePath))),
+		log:          logFactory.GetLogger("leader_selector", strconv.FormatUint(xxhash.Sum64String(znodePath), 10)),
 		ctx:          ctx,
 		cancel:       cancel,
 		nodeChangeCh: make(chan []string, 1),
