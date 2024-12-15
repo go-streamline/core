@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/go-streamline/interfaces/definitions"
+	"path"
 	"sync"
 	"time"
 
@@ -44,12 +45,17 @@ type leaderSelector struct {
 }
 
 // NewZookeeperLeaderSelector creates a new instance of the leader selector for Zookeeper.
-func NewZookeeperLeaderSelector(conn leaderSelectorZookeeperInterface, znodePath string, log *logrus.Logger, lockName string) definitions.LeaderSelector {
+func NewZookeeperLeaderSelector(
+	conn leaderSelectorZookeeperInterface,
+	znodePath string,
+	logFactory definitions.LoggerFactory,
+	lockName string,
+) definitions.LeaderSelector {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &leaderSelector{
 		conn:         conn,
 		znodePath:    znodePath,
-		log:          log,
+		log:          logFactory.GetLogger("leader_selector-" + path.Join(znodePath, lockName)),
 		ctx:          ctx,
 		cancel:       cancel,
 		nodeChangeCh: make(chan []string, 1),

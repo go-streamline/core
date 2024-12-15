@@ -40,14 +40,20 @@ type coordinatorZookeeperInterface interface {
 }
 
 // NewCoordinator creates a new Coordinator instance.
-func NewCoordinator(leaderSelector definitions.LeaderSelector, conn coordinatorZookeeperInterface, tpLeaderPath string, log *logrus.Logger) definitions.Coordinator {
+func NewCoordinator(
+	leaderSelector definitions.LeaderSelector,
+	conn coordinatorZookeeperInterface,
+	tpLeaderPath string,
+	logFactory definitions.LoggerFactory,
+) definitions.Coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
+	tpLeaderPath = path.Dir(tpLeaderPath)
 	c := &coordinator{
 		leaderSelector: leaderSelector,
 		conn:           conn,
-		tpLeaderPath:   path.Dir(tpLeaderPath),
+		tpLeaderPath:   tpLeaderPath,
 		tpLeaders:      make(map[uuid.UUID]string),
-		log:            log,
+		log:            logFactory.GetLogger("coordinator-" + tpLeaderPath),
 		ctx:            ctx,
 		cancel:         cancel,
 		nodes:          []string{},
